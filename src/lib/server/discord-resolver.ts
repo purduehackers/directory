@@ -1,20 +1,24 @@
-import { eq, sql } from 'drizzle-orm';
 import { config } from './config';
-import { ensureDbInitialized } from './db';
-import {
-  discordProfiles,
-  type DiscordProfile,
-  type DiscordProfileRow,
-} from './db/schema';
+import type { DiscordProfile, DiscordProfileRow } from './db/schema';
+import { runtimeCache, resetRuntimeCacheForTesting } from './runtime-cache';
+import { waitUntil } from '@vercel/functions';
 
 const DISCORD_API_BASE = 'https://discord.com/api/v10';
 const SNOWFLAKE_REGEX = /^\d{17,20}$/;
 
-const NEGATIVE_CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours for 404 Not Found
-const ERROR_BACKOFF_TTL_MS = 15 * 60 * 1000; // 15 minutes for 5xx / network errors
-const FETCH_TIMEOUT_MS = 6_000;
-const MIN_REQUEST_INTERVAL_MS = 150; // ~6.6 req/sec baseline pacing
-const SNAPSHOT_NOTIFY_DEBOUNCE_MS = 2_500;
+export const DISCORD_CACHE_TAG = 'discord-profiles';
+const DISCORD_USER_KEY_PREFIX = 'discord:user:v1:';
+const DISCORD_GUILD_WARMUP_PREFIX = 'discord:guild-warmup:v1:';
+
+const NEGATIVE_CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours for 404 Not Found tombstones
+const ERROR_BACKOFF_TTL_MS = 15 * 60 * 1000; // 15 minutes for 5xx / network / rate-limit errors
+const GUILD_WARMUP_TTL_MS = 60 * 60 * 1000; // 1 hour marker for bulk guild member warmup
+const FETCH_TIMEOUT_MS = 4_000;
+
+// Serverless safety budgets so cold starts never exceed function timeout
+const MAX_CONCURRENCY = 4;
+const MAX_LIVE_FETCHES_PER_REQUEST = 15;
+const MAX_RESOLUTION_BUDGET_MS = 3_500;
 
 type DiscordApiUser = {
   id: string;
@@ -31,43 +35,27 @@ type DiscordApiGuildMember = {
 
 let memoryRowsCache: Map<string, DiscordProfileRow> | null = null;
 let publicProfilesCache: Map<string, DiscordProfile> | null = null;
-let inFlightLoadPromise: Promise<ReadonlyMap<string, DiscordProfile>> | null = null;
-
-const pendingQueue = new Set<string>();
-const inFlightIds = new Set<string>();
-let workerRunning = false;
-let guildWarmupAttempted = false;
 let missingTokenWarned = false;
 let devSeeded = false;
-
 let onProfilesUpdatedCallback: (() => void) | null = null;
-let notifyTimer: ReturnType<typeof setTimeout> | null = null;
 
 export function registerDiscordUpdateListener(cb: () => void): void {
   onProfilesUpdatedCallback = cb;
 }
 
-function scheduleSnapshotNotification(immediate = false): void {
-  if (!onProfilesUpdatedCallback) return;
-  if (immediate) {
-    if (notifyTimer) {
-      clearTimeout(notifyTimer);
-      notifyTimer = null;
-    }
-    onProfilesUpdatedCallback();
-    return;
-  }
-  if (notifyTimer) return;
-  notifyTimer = setTimeout(() => {
-    notifyTimer = null;
-    onProfilesUpdatedCallback?.();
-  }, SNAPSHOT_NOTIFY_DEBOUNCE_MS);
+function getUserCacheKey(discordId: string): string {
+  return `${DISCORD_USER_KEY_PREFIX}${discordId}`;
+}
+
+function getGuildWarmupKey(guildId: string): string {
+  return `${DISCORD_GUILD_WARMUP_PREFIX}${guildId}`;
 }
 
 function computeResolvedExpiry(now = Date.now()): number {
-  // Add ±12 hours random jitter to prevent synchronized cache stampedes
+  // ±12 hours random jitter (clamped to at least 1 hour) to avoid synchronized cache stampedes
   const jitterMs = Math.floor((Math.random() - 0.5) * 24 * 60 * 60 * 1000);
-  return now + config.discordCacheTtlMs + jitterMs;
+  const ttlMs = Math.max(60 * 60 * 1000, config.discordCacheTtlMs + jitterMs);
+  return now + ttlMs;
 }
 
 export function formatDiscordUsername(user: DiscordApiUser): string {
@@ -98,18 +86,28 @@ export function rowToDiscordProfile(row: DiscordProfileRow | undefined): Discord
   };
 }
 
-function rebuildPublicProfilesCache(): Map<string, DiscordProfile> {
-  const result = new Map<string, DiscordProfile>();
-  if (memoryRowsCache) {
-    for (const [id, row] of memoryRowsCache.entries()) {
-      const publicProf = rowToDiscordProfile(row);
-      if (publicProf) {
-        result.set(id, publicProf);
-      }
-    }
+function ensureL1Maps(): {
+  rows: Map<string, DiscordProfileRow>;
+  publicMap: Map<string, DiscordProfile>;
+} {
+  if (!memoryRowsCache) {
+    memoryRowsCache = new Map();
   }
-  publicProfilesCache = result;
-  return result;
+  if (!publicProfilesCache) {
+    publicProfilesCache = new Map();
+  }
+  return { rows: memoryRowsCache, publicMap: publicProfilesCache };
+}
+
+function setL1Row(row: DiscordProfileRow): void {
+  const { rows, publicMap } = ensureL1Maps();
+  rows.set(row.discordId, row);
+  const pub = rowToDiscordProfile(row);
+  if (pub) {
+    publicMap.set(row.discordId, pub);
+  } else {
+    publicMap.delete(row.discordId);
+  }
 }
 
 export function getDevMockDiscordProfiles(): Map<string, DiscordProfileRow> {
@@ -161,220 +159,81 @@ export function getDevMockDiscordProfiles(): Map<string, DiscordProfileRow> {
 export function getCachedDiscordProfilesMap(): ReadonlyMap<string, DiscordProfile> {
   if (publicProfilesCache) return publicProfilesCache;
   if (!memoryRowsCache) return new Map();
-  return rebuildPublicProfilesCache();
-}
-
-export async function loadAllDiscordProfilesMap(
-  forceReload = false,
-  seedMocks = config.useMockDirectory
-): Promise<ReadonlyMap<string, DiscordProfile>> {
-  if (publicProfilesCache && !forceReload) {
-    return publicProfilesCache;
+  const result = new Map<string, DiscordProfile>();
+  for (const [id, row] of memoryRowsCache.entries()) {
+    const pub = rowToDiscordProfile(row);
+    if (pub) result.set(id, pub);
   }
-
-  if (inFlightLoadPromise && !forceReload) {
-    return inFlightLoadPromise;
-  }
-
-  inFlightLoadPromise = (async () => {
-    try {
-      const db = await ensureDbInitialized();
-      let rows = await db.select().from(discordProfiles);
-
-      if (rows.length === 0 && seedMocks && !devSeeded) {
-        devSeeded = true;
-        const mockRows = getDevMockDiscordProfiles();
-        for (const r of mockRows.values()) {
-          try {
-            await db
-              .insert(discordProfiles)
-              .values(r)
-              .onConflictDoUpdate({
-                target: discordProfiles.discordId,
-                set: {
-                  username: r.username,
-                  globalName: r.globalName,
-                  guildNickname: r.guildNickname,
-                  avatarUrl: r.avatarUrl,
-                  status: r.status,
-                  fetchedAt: r.fetchedAt,
-                  expiresAt: r.expiresAt,
-                },
-              });
-          } catch {}
-        }
-        rows = await db.select().from(discordProfiles);
-      }
-
-      const nextRowsMap = new Map<string, DiscordProfileRow>();
-      for (const row of rows) {
-        nextRowsMap.set(row.discordId, row);
-      }
-
-      // Preserve any newer in-memory rows from concurrent worker updates
-      if (memoryRowsCache) {
-        for (const [id, existing] of memoryRowsCache.entries()) {
-          const loaded = nextRowsMap.get(id);
-          if (!loaded || existing.fetchedAt > loaded.fetchedAt) {
-            nextRowsMap.set(id, existing);
-          }
-        }
-      }
-
-      memoryRowsCache = nextRowsMap;
-      return rebuildPublicProfilesCache();
-    } catch (err) {
-      console.error('[Discord Resolver] Failed to load discord profiles from DB:', err);
-      return publicProfilesCache ?? new Map();
-    } finally {
-      inFlightLoadPromise = null;
-    }
-  })();
-
-  return inFlightLoadPromise;
+  publicProfilesCache = result;
+  return result;
 }
 
 export async function upsertDiscordProfileRow(row: DiscordProfileRow): Promise<void> {
-  if (!memoryRowsCache) {
-    memoryRowsCache = new Map();
-  }
-  memoryRowsCache.set(row.discordId, row);
-
-  if (!publicProfilesCache) {
-    publicProfilesCache = new Map();
-  }
-  const publicProf = rowToDiscordProfile(row);
-  if (publicProf) {
-    publicProfilesCache.set(row.discordId, publicProf);
-  } else {
-    publicProfilesCache.delete(row.discordId);
-  }
-
-  try {
-    const db = await ensureDbInitialized();
-    await db
-      .insert(discordProfiles)
-      .values(row)
-      .onConflictDoUpdate({
-        target: discordProfiles.discordId,
-        set: {
-          username: row.username,
-          globalName: row.globalName,
-          guildNickname: row.guildNickname,
-          avatarUrl: row.avatarUrl,
-          status: row.status,
-          fetchedAt: row.fetchedAt,
-          expiresAt: row.expiresAt,
-        },
-      });
-  } catch (err) {
-    console.error(`[Discord Resolver] Failed to persist profile for ${row.discordId}:`, err);
-  }
+  setL1Row(row);
+  const ttlMs = Math.max(1_000, row.expiresAt - Date.now());
+  await runtimeCache.set(getUserCacheKey(row.discordId), row, {
+    ttlMs,
+    tags: [DISCORD_CACHE_TAG, `discord-user:${row.discordId}`],
+    name: `discord-profile:${row.discordId}`,
+  });
 }
 
 async function upsertDiscordProfileRowsBatch(rows: DiscordProfileRow[]): Promise<void> {
   if (rows.length === 0) return;
-  if (!memoryRowsCache) {
-    memoryRowsCache = new Map();
-  }
-  if (!publicProfilesCache) {
-    publicProfilesCache = new Map();
-  }
-
-  for (const row of rows) {
-    memoryRowsCache.set(row.discordId, row);
-    const publicProf = rowToDiscordProfile(row);
-    if (publicProf) {
-      publicProfilesCache.set(row.discordId, publicProf);
-    } else {
-      publicProfilesCache.delete(row.discordId);
-    }
-  }
-
-  try {
-    const db = await ensureDbInitialized();
-    const CHUNK_SIZE = 100;
-    for (let i = 0; i < rows.length; i += CHUNK_SIZE) {
-      const chunk = rows.slice(i, i + CHUNK_SIZE);
-      await db
-        .insert(discordProfiles)
-        .values(chunk)
-        .onConflictDoUpdate({
-          target: discordProfiles.discordId,
-          set: {
-            username: sql`excluded.username`,
-            globalName: sql`excluded.global_name`,
-            guildNickname: sql`excluded.guild_nickname`,
-            avatarUrl: sql`excluded.avatar_url`,
-            status: sql`excluded.status`,
-            fetchedAt: sql`excluded.fetched_at`,
-            expiresAt: sql`excluded.expires_at`,
-          },
-        });
-    }
-  } catch (err) {
-    console.error(`[Discord Resolver] Failed to persist batch of ${rows.length} profiles:`, err);
-  }
-}
-
-export function enqueueDiscordResolutions(discordIds: string[]): void {
   const now = Date.now();
-  let added = 0;
-
-  for (const rawId of discordIds) {
-    if (!rawId) continue;
-    const id = rawId.trim();
-    if (!SNOWFLAKE_REGEX.test(id)) continue;
-    if (pendingQueue.has(id) || inFlightIds.has(id)) continue;
-
-    const cached = memoryRowsCache?.get(id);
-    if (cached && cached.expiresAt > now) {
-      continue; // Fresh cache hit (resolved, not_found, or backoff window)
-    }
-
-    pendingQueue.add(id);
-    added++;
-  }
-
-  if (added > 0 && !workerRunning) {
-    void processResolutionQueue();
-  }
+  await Promise.all(
+    rows.map((row) => {
+      setL1Row(row);
+      const ttlMs = Math.max(1_000, row.expiresAt - now);
+      return runtimeCache.set(getUserCacheKey(row.discordId), row, {
+        ttlMs,
+        tags: [DISCORD_CACHE_TAG, `discord-user:${row.discordId}`],
+        name: `discord-profile:${row.discordId}`,
+      });
+    })
+  );
 }
 
-async function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
+async function tryGuildBulkWarmup(force = false, targetIds?: ReadonlySet<string>): Promise<number> {
+  const guildId = config.discordGuildId;
+  const botToken = config.discordBotToken;
+  if (!guildId || !botToken) return 0;
 
-async function tryGuildBulkWarmup(): Promise<number> {
-  if (guildWarmupAttempted || !config.discordGuildId || !config.discordBotToken) {
-    return 0;
+  const warmupKey = getGuildWarmupKey(guildId);
+  if (!force) {
+    const alreadyWarmed = await runtimeCache.get<boolean>(warmupKey);
+    if (alreadyWarmed) return 0;
   }
-  guildWarmupAttempted = true;
 
   try {
-    const url = `${DISCORD_API_BASE}/guilds/${encodeURIComponent(config.discordGuildId)}/members?limit=1000`;
+    const url = `${DISCORD_API_BASE}/guilds/${encodeURIComponent(guildId)}/members?limit=1000`;
     const res = await fetch(url, {
       headers: {
-        Authorization: `Bot ${config.discordBotToken}`,
+        Authorization: `Bot ${botToken}`,
         Accept: 'application/json',
       },
       signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
     });
 
     if (!res.ok) {
+      await runtimeCache.set(warmupKey, true, {
+        ttlMs: ERROR_BACKOFF_TTL_MS,
+        tags: [DISCORD_CACHE_TAG],
+        name: 'discord-guild-warmup-backoff',
+      });
       return 0;
     }
 
     const members = (await res.json()) as DiscordApiGuildMember[];
     const now = Date.now();
-    let hydratedCount = 0;
-    const rowsToUpsert: DiscordProfileRow[] = [];
+    const rowsToPersist: DiscordProfileRow[] = [];
 
     for (const m of members) {
       const user = m.user;
       if (!user || !user.id || !user.username) continue;
-
-      const row: DiscordProfileRow = {
+      // Only persist L2 entries for Discord accounts that actually belong to directory members
+      if (targetIds && !targetIds.has(user.id)) continue;
+      rowsToPersist.push({
         discordId: user.id,
         username: formatDiscordUsername(user),
         globalName: user.global_name ?? null,
@@ -383,208 +242,48 @@ async function tryGuildBulkWarmup(): Promise<number> {
         status: 'resolved',
         fetchedAt: now,
         expiresAt: computeResolvedExpiry(now),
-      };
-
-      rowsToUpsert.push(row);
-      if (pendingQueue.delete(user.id)) {
-        hydratedCount++;
-      }
+      });
     }
 
-    if (rowsToUpsert.length > 0) {
-      await upsertDiscordProfileRowsBatch(rowsToUpsert);
-    }
+    await upsertDiscordProfileRowsBatch(rowsToPersist);
+    await runtimeCache.set(warmupKey, true, {
+      ttlMs: GUILD_WARMUP_TTL_MS,
+      tags: [DISCORD_CACHE_TAG],
+      name: 'discord-guild-warmup',
+    });
 
-    if (hydratedCount > 0) {
-      console.log(`[Discord Resolver] Hydrated ${hydratedCount} Discord profiles via Guild bulk warmup`);
-    }
-    return hydratedCount;
+    return rowsToPersist.length;
   } catch (err) {
-    console.warn('[Discord Resolver] Guild bulk warmup skipped:', err);
+    console.warn('[Discord Resolver] Guild bulk warmup failed:', err);
     return 0;
   }
 }
 
-async function processResolutionQueue(): Promise<void> {
-  if (workerRunning) return;
-  workerRunning = true;
-  let updatedAny = false;
+async function fetchSingleDiscordProfileReadThrough(
+  discordId: string
+): Promise<{ row: DiscordProfileRow; rateLimited: boolean }> {
+  const now = Date.now();
+  const botToken = config.discordBotToken;
+  const guildId = config.discordGuildId;
 
-  try {
-    if (!config.discordBotToken) {
-      if (!missingTokenWarned && !config.useMockDirectory) {
-        missingTokenWarned = true;
-        console.warn(
-          '[Discord Resolver] DISCORD_BOT_TOKEN is not set; skipping live Discord user resolution.'
-        );
-      }
-      pendingQueue.clear();
-      return;
-    }
+  // 1. Try Guild Member endpoint first if DISCORD_GUILD_ID is configured (captures server nickname)
+  if (guildId) {
+    try {
+      const guildUrl = `${DISCORD_API_BASE}/guilds/${encodeURIComponent(guildId)}/members/${encodeURIComponent(discordId)}`;
+      const guildRes = await fetch(guildUrl, {
+        headers: {
+          Authorization: `Bot ${botToken}`,
+          Accept: 'application/json',
+        },
+        signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+      });
 
-    // If multiple IDs are queued and DISCORD_GUILD_ID is configured, try guild bulk warmup first
-    if (pendingQueue.size >= 5 && !guildWarmupAttempted) {
-      const hydrated = await tryGuildBulkWarmup();
-      if (hydrated > 0) {
-        updatedAny = true;
-        scheduleSnapshotNotification();
-      }
-    }
-
-    while (pendingQueue.size > 0) {
-      const nextId = pendingQueue.values().next().value;
-      if (!nextId) break;
-
-      pendingQueue.delete(nextId);
-      inFlightIds.add(nextId);
-
-      try {
-        const now = Date.now();
-        let targetUser: DiscordApiUser | null = null;
-        let guildNickname: string | null = null;
-        let lastResponse: Response | null = null;
-
-        // 1. If DISCORD_GUILD_ID is configured, try fetching guild member first to capture server nickname
-        if (config.discordGuildId) {
-          try {
-            const guildUrl = `${DISCORD_API_BASE}/guilds/${encodeURIComponent(config.discordGuildId)}/members/${encodeURIComponent(nextId)}`;
-            const guildRes = await fetch(guildUrl, {
-              headers: {
-                Authorization: `Bot ${config.discordBotToken}`,
-                Accept: 'application/json',
-              },
-              signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
-            });
-            lastResponse = guildRes;
-
-            if (guildRes.status === 429) {
-              const parsedRetry = parseFloat(guildRes.headers.get('Retry-After') || '1');
-              const retryAfterSec = Number.isFinite(parsedRetry) && parsedRetry > 0 ? parsedRetry : 1;
-              const delayMs = Math.min(Math.ceil(retryAfterSec * 1000) + 250, 60_000);
-              console.warn(`[Discord Resolver] Rate limited on guild member (429); pausing for ${delayMs}ms`);
-              pendingQueue.add(nextId);
-              await sleep(delayMs);
-              continue;
-            }
-
-            if (guildRes.ok) {
-              const memberData = (await guildRes.json()) as DiscordApiGuildMember;
-              if (memberData.user && memberData.user.username) {
-                targetUser = memberData.user;
-                guildNickname = memberData.nick ?? null;
-              }
-            }
-          } catch (err) {
-            console.warn(`[Discord Resolver] Guild member fetch error for ${nextId}:`, err);
-          }
-        }
-
-        // 2. If not found in guild or guild lookup not configured, fall back to global /users/:id
-        if (!targetUser) {
-          const url = `${DISCORD_API_BASE}/users/${encodeURIComponent(nextId)}`;
-          const res = await fetch(url, {
-            headers: {
-              Authorization: `Bot ${config.discordBotToken}`,
-              Accept: 'application/json',
-            },
-            signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
-          });
-          lastResponse = res;
-
-          if (res.status === 429) {
-            const parsedRetry = parseFloat(res.headers.get('Retry-After') || '1');
-            const retryAfterSec = Number.isFinite(parsedRetry) && parsedRetry > 0 ? parsedRetry : 1;
-            const delayMs = Math.min(Math.ceil(retryAfterSec * 1000) + 250, 60_000);
-            console.warn(`[Discord Resolver] Rate limited (429); pausing for ${delayMs}ms`);
-            pendingQueue.add(nextId);
-            await sleep(delayMs);
-            continue;
-          }
-
-          if (res.status === 404) {
-            // Negative cache for deleted / non-existent users
-            const notFoundRow: DiscordProfileRow = {
-              discordId: nextId,
-              username: null,
-              globalName: null,
-              guildNickname: null,
-              avatarUrl: null,
-              status: 'not_found',
-              fetchedAt: now,
-              expiresAt: now + NEGATIVE_CACHE_TTL_MS,
-            };
-            await upsertDiscordProfileRow(notFoundRow);
-            await sleep(MIN_REQUEST_INTERVAL_MS);
-            continue;
-          }
-
-          if (res.status === 401 || res.status === 403) {
-            console.error('[Discord Resolver] DISCORD_BOT_TOKEN is invalid or lacks access. Stopping queue.');
-            pendingQueue.clear();
-            break;
-          }
-
-          if (!res.ok) {
-            console.warn(`[Discord Resolver] Unexpected status ${res.status} resolving ${nextId}`);
-            const existing = memoryRowsCache?.get(nextId);
-            const errRow: DiscordProfileRow = existing
-              ? { ...existing, expiresAt: now + ERROR_BACKOFF_TTL_MS }
-              : {
-                  discordId: nextId,
-                  username: null,
-                  globalName: null,
-                  guildNickname: null,
-                  avatarUrl: null,
-                  status: 'error',
-                  fetchedAt: now,
-                  expiresAt: now + ERROR_BACKOFF_TTL_MS,
-                };
-            if (!memoryRowsCache) memoryRowsCache = new Map();
-            memoryRowsCache.set(nextId, errRow);
-            await sleep(1_000);
-            continue;
-          }
-
-          const data = (await res.json()) as DiscordApiUser;
-          if (!data || !data.username) {
-            continue;
-          }
-          targetUser = data;
-        }
-
-        const row: DiscordProfileRow = {
-          discordId: nextId,
-          username: formatDiscordUsername(targetUser),
-          globalName: targetUser.global_name ?? null,
-          guildNickname,
-          avatarUrl: buildAvatarUrl(targetUser),
-          status: 'resolved',
-          fetchedAt: now,
-          expiresAt: computeResolvedExpiry(now),
-        };
-
-        await upsertDiscordProfileRow(row);
-        updatedAny = true;
-        scheduleSnapshotNotification();
-
-        // Respect proactive rate limit headers if bucket is nearly exhausted
-        const remaining = lastResponse?.headers.get('X-RateLimit-Remaining');
-        const resetAfter = lastResponse?.headers.get('X-RateLimit-Reset-After');
-        if (remaining === '0' && resetAfter) {
-          const parsed = parseFloat(resetAfter);
-          const resetMs = Number.isFinite(parsed) && parsed > 0 ? Math.ceil(parsed * 1000) + 150 : MIN_REQUEST_INTERVAL_MS;
-          await sleep(Math.min(resetMs, 10_000));
-        } else {
-          await sleep(MIN_REQUEST_INTERVAL_MS);
-        }
-      } catch (err) {
-        console.warn(`[Discord Resolver] Network error resolving ${nextId}:`, err);
-        const now = Date.now();
-        const existing = memoryRowsCache?.get(nextId);
-        const errRow: DiscordProfileRow = existing
+      if (guildRes.status === 429) {
+        const existing = memoryRowsCache?.get(discordId);
+        const backoffRow: DiscordProfileRow = existing
           ? { ...existing, expiresAt: now + ERROR_BACKOFF_TTL_MS }
           : {
-              discordId: nextId,
+              discordId,
               username: null,
               globalName: null,
               guildNickname: null,
@@ -593,34 +292,279 @@ async function processResolutionQueue(): Promise<void> {
               fetchedAt: now,
               expiresAt: now + ERROR_BACKOFF_TTL_MS,
             };
-        if (!memoryRowsCache) memoryRowsCache = new Map();
-        memoryRowsCache.set(nextId, errRow);
-        await sleep(1_000);
-      } finally {
-        inFlightIds.delete(nextId);
+        await upsertDiscordProfileRow(backoffRow);
+        return { row: backoffRow, rateLimited: true };
+      }
+
+      if (guildRes.ok) {
+        const memberData = (await guildRes.json()) as DiscordApiGuildMember;
+        if (memberData.user && memberData.user.username) {
+          const resolvedRow: DiscordProfileRow = {
+            discordId,
+            username: formatDiscordUsername(memberData.user),
+            globalName: memberData.user.global_name ?? null,
+            guildNickname: memberData.nick ?? null,
+            avatarUrl: buildAvatarUrl(memberData.user),
+            status: 'resolved',
+            fetchedAt: now,
+            expiresAt: computeResolvedExpiry(now),
+          };
+          await upsertDiscordProfileRow(resolvedRow);
+          return { row: resolvedRow, rateLimited: false };
+        }
+      }
+    } catch (err) {
+      console.warn(`[Discord Resolver] Guild member lookup error for ${discordId}:`, err);
+    }
+  }
+
+  // 2. Fallback to global /users/:id endpoint
+  try {
+    const userUrl = `${DISCORD_API_BASE}/users/${encodeURIComponent(discordId)}`;
+    const userRes = await fetch(userUrl, {
+      headers: {
+        Authorization: `Bot ${botToken}`,
+        Accept: 'application/json',
+      },
+      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+    });
+
+    if (userRes.status === 429) {
+      const existing = memoryRowsCache?.get(discordId);
+      const backoffRow: DiscordProfileRow = existing
+        ? { ...existing, expiresAt: now + ERROR_BACKOFF_TTL_MS }
+        : {
+            discordId,
+            username: null,
+            globalName: null,
+            guildNickname: null,
+            avatarUrl: null,
+            status: 'error',
+            fetchedAt: now,
+            expiresAt: now + ERROR_BACKOFF_TTL_MS,
+          };
+      await upsertDiscordProfileRow(backoffRow);
+      return { row: backoffRow, rateLimited: true };
+    }
+
+    if (userRes.status === 404) {
+      // 24-hour Negative Cache Tombstone for non-existent / deleted Discord accounts
+      const tombstoneRow: DiscordProfileRow = {
+        discordId,
+        username: null,
+        globalName: null,
+        guildNickname: null,
+        avatarUrl: null,
+        status: 'not_found',
+        fetchedAt: now,
+        expiresAt: now + NEGATIVE_CACHE_TTL_MS,
+      };
+      await upsertDiscordProfileRow(tombstoneRow);
+      return { row: tombstoneRow, rateLimited: false };
+    }
+
+    if (!userRes.ok) {
+      const existing = memoryRowsCache?.get(discordId);
+      const errRow: DiscordProfileRow = existing
+        ? { ...existing, expiresAt: now + ERROR_BACKOFF_TTL_MS }
+        : {
+            discordId,
+            username: null,
+            globalName: null,
+            guildNickname: null,
+            avatarUrl: null,
+            status: 'error',
+            fetchedAt: now,
+            expiresAt: now + ERROR_BACKOFF_TTL_MS,
+          };
+      await upsertDiscordProfileRow(errRow);
+      return { row: errRow, rateLimited: userRes.status === 401 || userRes.status === 403 };
+    }
+
+    const userData = (await userRes.json()) as DiscordApiUser;
+    const resolvedRow: DiscordProfileRow = {
+      discordId,
+      username: formatDiscordUsername(userData),
+      globalName: userData.global_name ?? null,
+      guildNickname: null,
+      avatarUrl: buildAvatarUrl(userData),
+      status: 'resolved',
+      fetchedAt: now,
+      expiresAt: computeResolvedExpiry(now),
+    };
+    await upsertDiscordProfileRow(resolvedRow);
+    return { row: resolvedRow, rateLimited: false };
+  } catch (err) {
+    console.warn(`[Discord Resolver] Network error resolving ${discordId}:`, err);
+    const existing = memoryRowsCache?.get(discordId);
+    const errRow: DiscordProfileRow = existing
+      ? { ...existing, expiresAt: now + ERROR_BACKOFF_TTL_MS }
+      : {
+          discordId,
+          username: null,
+          globalName: null,
+          guildNickname: null,
+          avatarUrl: null,
+          status: 'error',
+          fetchedAt: now,
+          expiresAt: now + ERROR_BACKOFF_TTL_MS,
+        };
+    await upsertDiscordProfileRow(errRow);
+    return { row: errRow, rateLimited: false };
+  }
+}
+
+/**
+ * Resolves a list of Discord snowflake IDs using the two-tier Read-Through Cache:
+ * L1 (isolate Map) -> L2 (Vercel Runtime Cache) -> Guild Bulk Warmup -> Bounded Live Fetch.
+ */
+export async function resolveDiscordProfiles(
+  discordIds: string[],
+  options: { forceRefresh?: boolean; seedMocks?: boolean } = {}
+): Promise<ReadonlyMap<string, DiscordProfile>> {
+  const { forceRefresh = false, seedMocks = config.useMockDirectory } = options;
+  const now = Date.now();
+  ensureL1Maps();
+
+  if (seedMocks && !devSeeded) {
+    devSeeded = true;
+    const mocks = getDevMockDiscordProfiles();
+    await upsertDiscordProfileRowsBatch([...mocks.values()]);
+  }
+
+  const validIds = [
+    ...new Set(
+      discordIds
+        .map((id) => id?.trim())
+        .filter((id): id is string => Boolean(id && SNOWFLAKE_REGEX.test(id)))
+    ),
+  ];
+
+  if (validIds.length === 0) {
+    return getCachedDiscordProfilesMap();
+  }
+
+  // Step 1: Identify L1 misses or expired rows
+  const l1Misses: string[] = [];
+  for (const id of validIds) {
+    const l1Row = memoryRowsCache?.get(id);
+    if (forceRefresh || !l1Row || l1Row.expiresAt <= now) {
+      l1Misses.push(id);
+    }
+  }
+
+  if (l1Misses.length === 0) {
+    return getCachedDiscordProfilesMap();
+  }
+
+  // Step 2: Check L2 Vercel Runtime Cache in parallel for L1 misses
+  const l2Misses: string[] = [];
+  if (!forceRefresh) {
+    const l2Results = await Promise.all(
+      l1Misses.map(async (id) => ({
+        id,
+        row: await runtimeCache.get<DiscordProfileRow>(getUserCacheKey(id)),
+      }))
+    );
+
+    for (const { id, row } of l2Results) {
+      if (row && row.expiresAt > now) {
+        setL1Row(row);
+      } else {
+        l2Misses.push(id);
       }
     }
-  } finally {
-    workerRunning = false;
-    if (updatedAny) {
-      scheduleSnapshotNotification(true);
+  } else {
+    l2Misses.push(...l1Misses);
+  }
+
+  if (l2Misses.length === 0) {
+    return getCachedDiscordProfilesMap();
+  }
+
+  // Step 3: Live Discord API resolution (if DISCORD_BOT_TOKEN is configured)
+  if (!config.discordBotToken) {
+    if (!missingTokenWarned && !config.useMockDirectory) {
+      missingTokenWarned = true;
+      console.warn(
+        '[Discord Resolver] DISCORD_BOT_TOKEN is not set; skipping live Discord user resolution.'
+      );
     }
+    return getCachedDiscordProfilesMap();
+  }
+
+  // Step 3a: Try Guild Bulk Warmup first if DISCORD_GUILD_ID is configured
+  if (config.discordGuildId && l2Misses.length >= 2) {
+    await tryGuildBulkWarmup(forceRefresh, new Set(validIds));
+  }
+
+  // Re-filter remaining misses after Guild Bulk Warmup
+  const remainingMisses = l2Misses.filter((id) => {
+    const row = memoryRowsCache?.get(id);
+    return !row || row.expiresAt <= Date.now();
+  });
+
+  if (remainingMisses.length === 0) {
+    return getCachedDiscordProfilesMap();
+  }
+
+  // Step 3b: Bounded read-through resolution for remaining IDs
+  const deadline = Date.now() + MAX_RESOLUTION_BUDGET_MS;
+  const boundedTargetIds = remainingMisses.slice(0, MAX_LIVE_FETCHES_PER_REQUEST);
+  let cursor = 0;
+  let rateLimitedAbort = false;
+
+  async function runWorker(): Promise<void> {
+    while (!rateLimitedAbort && Date.now() < deadline) {
+      const idx = cursor++;
+      if (idx >= boundedTargetIds.length) break;
+      const targetId = boundedTargetIds[idx];
+      const { rateLimited } = await fetchSingleDiscordProfileReadThrough(targetId);
+      if (rateLimited) {
+        rateLimitedAbort = true;
+        break;
+      }
+    }
+  }
+
+  const workerCount = Math.min(MAX_CONCURRENCY, boundedTargetIds.length);
+  await Promise.all(Array.from({ length: workerCount }, () => runWorker()));
+
+  return getCachedDiscordProfilesMap();
+}
+
+export async function loadAllDiscordProfilesMap(
+  forceReload = false,
+  seedMocks = config.useMockDirectory,
+  discordIds: string[] = []
+): Promise<ReadonlyMap<string, DiscordProfile>> {
+  return resolveDiscordProfiles(discordIds, {
+    forceRefresh: forceReload,
+    seedMocks,
+  });
+}
+
+/**
+ * Retained for backward compatibility with synchronous callers.
+ * Triggers read-through resolution and notifies any registered snapshot listener on completion.
+ */
+export function enqueueDiscordResolutions(discordIds: string[]): void {
+  if (!discordIds || discordIds.length === 0) return;
+  const task = resolveDiscordProfiles(discordIds).then(() => {
+    onProfilesUpdatedCallback?.();
+  });
+  try {
+    waitUntil(task);
+  } catch {
+    // No-op outside Vercel request context
   }
 }
 
 export function resetDiscordResolverForTesting(): void {
   memoryRowsCache = null;
   publicProfilesCache = null;
-  inFlightLoadPromise = null;
-  pendingQueue.clear();
-  inFlightIds.clear();
-  workerRunning = false;
-  guildWarmupAttempted = false;
   missingTokenWarned = false;
   devSeeded = false;
-  if (notifyTimer) {
-    clearTimeout(notifyTimer);
-    notifyTimer = null;
-  }
   onProfilesUpdatedCallback = null;
+  resetRuntimeCacheForTesting();
 }

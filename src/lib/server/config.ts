@@ -68,10 +68,32 @@ export const config = {
     return `${this.publicUrl}/auth/callback`;
   },
   get databaseUrl(): string {
-    return getEnv('TURSO_DATABASE_URL') || getEnv('DATABASE_URL') || 'file:./data/directory.db';
+    const url = (
+      getEnv('TURSO_DATABASE_URL') ||
+      getEnv('DATABASE_URL') ||
+      (isProd ? '' : 'file:./data/directory.db')
+    ).trim();
+    if (isProd) {
+      if (!url) {
+        throw new Error(
+          '[Config] CRITICAL: TURSO_DATABASE_URL (or DATABASE_URL) must be set in production.'
+        );
+      }
+      if (url === ':memory:' || url.startsWith('file:')) {
+        throw new Error(
+          '[Config] CRITICAL: Local file: or :memory: SQLite URLs are not supported in production serverless environments. Use a remote Turso (libsql:// or https://) URL.'
+        );
+      }
+    }
+    return url;
   },
   get databaseAuthToken(): string | undefined {
     const token = getEnv('TURSO_AUTH_TOKEN') || getEnv('DATABASE_AUTH_TOKEN');
+    if (isProd && !token && !this.databaseUrl.startsWith('file:')) {
+      throw new Error(
+        '[Config] CRITICAL: TURSO_AUTH_TOKEN (or DATABASE_AUTH_TOKEN) must be set in production.'
+      );
+    }
     return token || undefined;
   },
   get discordBotToken(): string {

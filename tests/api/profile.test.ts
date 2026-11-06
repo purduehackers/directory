@@ -1,6 +1,6 @@
 import { describe, expect, it, beforeAll } from 'bun:test';
-import { GET, POST } from './profile';
-import { getDirectorySnapshot } from '../../lib/server/id-directory';
+import { GET, POST } from '../../src/pages/api/profile';
+import { getDirectorySnapshot } from '../../src/lib/server/id-directory';
 
 describe('/api/profile endpoint', () => {
   let activeSub = '';

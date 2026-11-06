@@ -50,18 +50,16 @@ export type MemberProfile = {
 
 export type DiscordResolutionStatus = 'resolved' | 'not_found' | 'error';
 
-export const discordProfiles = sqliteTable('discord_profiles', {
-  discordId: text('discord_id').primaryKey(),
-  username: text('username'),
-  globalName: text('global_name'),
-  guildNickname: text('guild_nickname'),
-  avatarUrl: text('avatar_url'),
-  status: text('status').$type<DiscordResolutionStatus>().notNull().default('resolved'),
-  fetchedAt: integer('fetched_at').notNull(),
-  expiresAt: integer('expires_at').notNull(),
-});
-
-export type DiscordProfileRow = typeof discordProfiles.$inferSelect;
+export type DiscordProfileRow = {
+  discordId: string;
+  username: string | null;
+  globalName: string | null;
+  guildNickname: string | null;
+  avatarUrl: string | null;
+  status: DiscordResolutionStatus;
+  fetchedAt: number;
+  expiresAt: number;
+};
 
 export type DiscordProfile = {
   discordId: string;

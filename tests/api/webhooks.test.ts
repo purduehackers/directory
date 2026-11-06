@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test';
-import { POST } from './id';
-import { config } from '../../../lib/server/config';
+import { POST } from '../../src/pages/api/webhooks/id';
+import { config } from '../../src/lib/server/config';
 
 describe('ID Webhook Security Endpoint', () => {
   it('fails closed with 503 if WEBHOOK_SECRET is not configured', async () => {

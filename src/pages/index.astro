@@ -3,15 +3,14 @@ import Layout from "../layouts/Layout.astro";
 import MemberCard from "../components/MemberCard.astro";
 import Icon from "../components/ph/Icon.astro";
 import { getDirectorySnapshot } from "../lib/server/id-directory";
-import {
-    filterAndSearchMembers,
-    type SortOption,
-} from "../lib/server/search";
+import { filterAndSearchMembers, type SortOption } from "../lib/server/search";
 
 const query = Astro.url.searchParams.get("q") || "";
 const role = Astro.url.searchParams.get("role") || "all";
 const gradYear = Astro.url.searchParams.get("gradYear") || "all";
-const sort = (Astro.url.searchParams.get("sort") as SortOption | null) || (query ? "relevance" : "name_asc");
+const sort =
+    (Astro.url.searchParams.get("sort") as SortOption | null) ||
+    (query ? "relevance" : "name_asc");
 
 let snapshot: Awaited<ReturnType<typeof getDirectorySnapshot>> | null = null;
 let loadError: string | null = null;
@@ -26,17 +25,20 @@ try {
 const allMembers = snapshot?.members ?? [];
 const filteredMembers = snapshot
     ? filterAndSearchMembers(snapshot, {
-        query,
-        role,
-        gradYear,
-        sort,
-    })
+          query,
+          role,
+          gradYear,
+          sort,
+      })
     : [];
 
 const availableGradYears = snapshot?.gradYears ?? [];
 const viewer = Astro.locals.user;
 const hasActiveFilters = Boolean(
-    query || role !== "all" || gradYear !== "all" || (query ? sort !== "relevance" : sort !== "name_asc"),
+    query ||
+    role !== "all" ||
+    gradYear !== "all" ||
+    (query ? sort !== "relevance" : sort !== "name_asc"),
 );
 
 const roleOptions = [
@@ -63,13 +65,25 @@ const roleOptions = [
                 </div>
 
                 <div class="flex items-center gap-2 self-start sm:self-end">
-                    <span id="member-counter-badge" class="font-mono text-xs font-semibold px-2 py-1 border border-foreground bg-card">
-                        <span id="member-count-num">{filteredMembers.length}</span>{" "}
-                        <span id="member-count-unit">{filteredMembers.length === 1 ? "member" : "members"}</span>
+                    <span
+                        id="member-counter-badge"
+                        class="font-mono text-xs font-semibold px-2 py-1 border border-foreground bg-card"
+                    >
+                        <span id="member-count-num">
+                            {filteredMembers.length}
+                        </span>{" "}
+                        <span id="member-count-unit">
+                            {filteredMembers.length === 1
+                                ? "member"
+                                : "members"}
+                        </span>
                     </span>
                     {allMembers.length > 0 &&
                         allMembers.length !== filteredMembers.length && (
-                            <span id="member-total-indicator" class="font-mono text-xs text-foreground/75">
+                            <span
+                                id="member-total-indicator"
+                                class="font-mono text-xs text-foreground/75"
+                            >
                                 (of {allMembers.length} total)
                             </span>
                         )}
@@ -114,7 +128,7 @@ const roleOptions = [
                             id="search-input"
                             name="q"
                             value={query}
-                            placeholder="e.g. Artus, testy, organizer, 2026..."
+                            placeholder="e.g. Artus, Kian, organizer, 2026..."
                             autocomplete="off"
                             autocorrect="off"
                             autocapitalize="off"
@@ -258,10 +272,14 @@ const roleOptions = [
         </form>
 
         <!-- Dynamic Empty State for Client-Side Filtering -->
-        <div id="client-empty-state" class="hidden border border-foreground bg-card p-12 text-center my-6">
+        <div
+            id="client-empty-state"
+            class="hidden border border-foreground bg-card p-12 text-center my-6"
+        >
             <h2 class="ph-headline text-2xl mb-2">NO MEMBERS FOUND</h2>
             <p class="font-sans text-sm text-foreground/80 mb-6 max-w-md mx-auto">
-                No Purdue Hackers members matched your search query. Try typing a different term or clear the search.
+                No Purdue Hackers members matched your search query. Try typing
+                a different term or clear the search.
             </p>
             <button
                 type="button"
@@ -309,8 +327,12 @@ const roleOptions = [
 
 <script>
     // Progressive enhancement: Instant client-side search filtering
-    const searchInput = document.getElementById("search-input") as HTMLInputElement | null;
-    const form = document.getElementById("directory-filter-form") as HTMLFormElement | null;
+    const searchInput = document.getElementById(
+        "search-input",
+    ) as HTMLInputElement | null;
+    const form = document.getElementById(
+        "directory-filter-form",
+    ) as HTMLFormElement | null;
     const cards = document.querySelectorAll<HTMLElement>(".member-card");
     const countNum = document.getElementById("member-count-num");
     const countUnit = document.getElementById("member-count-unit");
@@ -319,11 +341,13 @@ const roleOptions = [
     const clearBtn = document.getElementById("clear-client-search-btn");
 
     // Handle role filter radio selection on click without trapping keyboard arrow navigation
-    document.querySelectorAll<HTMLInputElement>("[data-role-radio]").forEach((radio) => {
-        radio.addEventListener("click", () => {
-            form?.submit();
+    document
+        .querySelectorAll<HTMLInputElement>("[data-role-radio]")
+        .forEach((radio) => {
+            radio.addEventListener("click", () => {
+                form?.submit();
+            });
         });
-    });
 
     if (clearBtn && searchInput) {
         clearBtn.addEventListener("click", () => {
@@ -331,7 +355,8 @@ const roleOptions = [
             if (searchParams.has("q")) {
                 searchParams.delete("q");
                 const queryStr = searchParams.toString();
-                window.location.href = window.location.pathname + (queryStr ? `?${queryStr}` : "");
+                window.location.href =
+                    window.location.pathname + (queryStr ? `?${queryStr}` : "");
             } else {
                 searchInput.value = "";
                 searchInput.dispatchEvent(new Event("input"));
@@ -346,13 +371,17 @@ const roleOptions = [
             return {
                 el: card,
                 name: (card.getAttribute("data-name") || "").toLowerCase(),
-                username: (card.getAttribute("data-username") || "").toLowerCase(),
+                username: (
+                    card.getAttribute("data-username") || ""
+                ).toLowerCase(),
                 roles: (card.getAttribute("data-roles") || "").toLowerCase(),
                 grad: card.getAttribute("data-grad") || "",
                 email: (card.getAttribute("data-email") || "").toLowerCase(),
                 phone,
                 phoneDigits: phone.replace(/\D/g, ""),
-                discord: (card.getAttribute("data-discord") || "").toLowerCase(),
+                discord: (
+                    card.getAttribute("data-discord") || ""
+                ).toLowerCase(),
             };
         });
 
@@ -362,24 +391,39 @@ const roleOptions = [
             const qDigits = isPhoneLikeQuery ? q.replace(/\D/g, "") : "";
             let visibleCount = 0;
 
-            indexedCards.forEach(({ el, name, username, roles, grad, email, phone, phoneDigits, discord }) => {
-                const matches =
-                    !q ||
-                    name.includes(q) ||
-                    username.includes(q) ||
-                    roles.includes(q) ||
-                    grad.includes(q) ||
-                    email.includes(q) ||
-                    phone.includes(q) ||
-                    (qDigits.length >= 3 && phoneDigits.includes(qDigits)) ||
-                    discord.includes(q);
+            indexedCards.forEach(
+                ({
+                    el,
+                    name,
+                    username,
+                    roles,
+                    grad,
+                    email,
+                    phone,
+                    phoneDigits,
+                    discord,
+                }) => {
+                    const matches =
+                        !q ||
+                        name.includes(q) ||
+                        username.includes(q) ||
+                        roles.includes(q) ||
+                        grad.includes(q) ||
+                        email.includes(q) ||
+                        phone.includes(q) ||
+                        (qDigits.length >= 3 &&
+                            phoneDigits.includes(qDigits)) ||
+                        discord.includes(q);
 
-                el.style.display = matches ? "" : "none";
-                if (matches) visibleCount++;
-            });
+                    el.style.display = matches ? "" : "none";
+                    if (matches) visibleCount++;
+                },
+            );
 
             if (countNum) countNum.textContent = String(visibleCount);
-            if (countUnit) countUnit.textContent = visibleCount === 1 ? "member" : "members";
+            if (countUnit)
+                countUnit.textContent =
+                    visibleCount === 1 ? "member" : "members";
 
             if (clientEmptyState && membersGrid) {
                 if (visibleCount === 0 && q) {

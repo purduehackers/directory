@@ -63,7 +63,7 @@ export const GET: APIRoute = async ({ url, cookies, redirect }) => {
     // If a new member registered and signs in while directory cache is warm,
     // invalidate and proactively refresh cache so they are immediately recognized
     if (isMemberActiveInSnapshot(user.sub) === false) {
-      invalidateDirectoryCache();
+      await invalidateDirectoryCache();
       await getDirectorySnapshot(true).catch((err) => {
         console.warn('[Auth Callback] Proactive directory refresh failed:', err);
       });

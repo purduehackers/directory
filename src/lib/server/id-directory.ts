@@ -10,6 +10,25 @@ import {
   loadAllDiscordProfilesMap,
   registerDiscordUpdateListener,
 } from './discord-resolver';
+import { runtimeCache } from './runtime-cache';
+import { waitUntil } from '@vercel/functions';
+
+export const DIRECTORY_UPSTREAM_TAG = 'directory-upstream';
+export const DIRECTORY_PROFILES_TAG = 'directory-profiles';
+const UPSTREAM_MEMBERS_CACHE_KEY = 'directory:upstream-members:v1';
+const DIRECTORY_SYNC_META_KEY = 'directory:sync-meta:v1';
+
+type UpstreamMembersCachePayload = {
+  members: DirectoryMember[];
+  fetchedAt: number;
+};
+
+type DirectorySyncMeta = {
+  upstreamFetchedAt: number;
+  profilesUpdatedAt: number;
+};
+
+let localProfilesUpdatedAt = 0;
 
 export type DirectoryMemberEmail = {
   email: string;
@@ -260,7 +279,6 @@ export function buildDirectorySnapshot(
   const bySub = new Map<string, DirectoryMember>();
   const years = new Set<number>();
   const locationsMap = new Map<string, string>();
-  const discordIdsToVerify: string[] = [];
   const publicMembers: DirectoryMember[] = [];
   const indexedItems: IndexedMember[] = [];
 
@@ -270,11 +288,6 @@ export function buildDirectorySnapshot(
     if (!m || typeof m.sub !== 'string' || typeof m.preferred_username !== 'string') continue;
 
     const profile = profilesBySub?.get(m.sub.toLowerCase()) ?? m.profile ?? null;
-    const cleanDiscordId = m.discord_id?.trim() || null;
-    if (cleanDiscordId) {
-      discordIdsToVerify.push(cleanDiscordId);
-    }
-
     const { doc, publicMember } = buildIndexedDoc(m, profile, resolvedDiscordMap);
 
     byUsername.set(m.preferred_username.toLowerCase(), publicMember);
@@ -293,10 +306,6 @@ export function buildDirectorySnapshot(
         locationsMap.set(key, trimmed);
       }
     }
-  }
-
-  if (discordIdsToVerify.length > 0) {
-    enqueueDiscordResolutions(discordIdsToVerify);
   }
 
   const searchIndex = new MiniSearch<IndexedMember>({
@@ -406,7 +415,9 @@ export async function getClientCredentialsToken(): Promise<string> {
   return inFlightTokenPromise;
 }
 
-export function refreshDirectorySnapshotProfiles(targetSub?: string): DirectorySnapshot | null {
+export async function refreshDirectorySnapshotProfiles(
+  targetSub?: string
+): Promise<DirectorySnapshot | null> {
   if (!upstreamMembersCache) {
     if (config.useMockDirectory) {
       upstreamMembersCache = {
@@ -420,6 +431,23 @@ export function refreshDirectorySnapshotProfiles(targetSub?: string): DirectoryS
 
   const profilesMap = getCachedProfilesMap();
   const discordMap = getCachedDiscordProfilesMap();
+  localProfilesUpdatedAt = Date.now();
+
+  // Await L2 sync metadata update so Vercel does not freeze the isolate before L2 commits
+  const syncPromise = runtimeCache.set<DirectorySyncMeta>(
+    DIRECTORY_SYNC_META_KEY,
+    {
+      upstreamFetchedAt: upstreamMembersCache.fetchedAt,
+      profilesUpdatedAt: localProfilesUpdatedAt,
+    },
+    { ttlMs: CACHE_TTL_MS, tags: [DIRECTORY_UPSTREAM_TAG, DIRECTORY_PROFILES_TAG] }
+  );
+  try {
+    waitUntil(syncPromise);
+  } catch {
+    // Fallback if outside Vercel request context
+  }
+  await syncPromise;
 
   // Fast-path: single member profile update
   if (targetSub && directoryCache && directoryCache.searchIndex) {
@@ -474,7 +502,22 @@ export async function getDirectorySnapshot(forceRefresh = false): Promise<Direct
     directoryCache.fetchedAt > 0 &&
     now - directoryCache.fetchedAt < CACHE_TTL_MS
   ) {
-    return directoryCache;
+    // Verify against L2 sync metadata so cross-isolate webhooks or profile updates are respected
+    const syncMeta = await runtimeCache.get<DirectorySyncMeta>(DIRECTORY_SYNC_META_KEY);
+    // Only trust L1 directoryCache if syncMeta exists AND upstreamFetchedAt matches our L1 snapshot
+    if (syncMeta && syncMeta.upstreamFetchedAt === directoryCache.fetchedAt) {
+      if (syncMeta.profilesUpdatedAt > localProfilesUpdatedAt && upstreamMembersCache) {
+        const freshProfiles = await loadAllProfilesMap(true);
+        localProfilesUpdatedAt = syncMeta.profilesUpdatedAt;
+        directoryCache = buildDirectorySnapshot(
+          upstreamMembersCache.members,
+          directoryCache.fetchedAt,
+          freshProfiles,
+          getCachedDiscordProfilesMap()
+        );
+      }
+      return directoryCache;
+    }
   }
 
   while (inFlightDirectoryPromise) {
@@ -501,79 +544,130 @@ export async function getDirectorySnapshot(forceRefresh = false): Promise<Direct
   inFlightDirectoryPromise = (async () => {
     try {
       if (config.useMockDirectory) {
+        const mockMembers = getDevMockMembers();
+        const discordIds = mockMembers
+          .map((m) => m.discord_id?.trim())
+          .filter((id): id is string => Boolean(id));
         const [profilesMap, discordMap] = await Promise.all([
           loadAllProfilesMap(),
-          loadAllDiscordProfilesMap(),
+          loadAllDiscordProfilesMap(forceRefresh, true, discordIds),
         ]);
-        const mockMembers = getDevMockMembers();
+        const fetchedAt = Date.now();
         upstreamMembersCache = {
           members: mockMembers,
-          fetchedAt: Date.now(),
+          fetchedAt,
         };
-        const snapshot = buildDirectorySnapshot(mockMembers, Date.now(), profilesMap, discordMap);
+        localProfilesUpdatedAt = fetchedAt;
+        await runtimeCache.set<DirectorySyncMeta>(
+          DIRECTORY_SYNC_META_KEY,
+          { upstreamFetchedAt: fetchedAt, profilesUpdatedAt: localProfilesUpdatedAt },
+          { ttlMs: CACHE_TTL_MS, tags: [DIRECTORY_UPSTREAM_TAG, DIRECTORY_PROFILES_TAG] }
+        );
+        const snapshot = buildDirectorySnapshot(mockMembers, fetchedAt, profilesMap, discordMap);
         directoryCache = snapshot;
         return directoryCache;
       }
 
-      const [token, profilesMap, discordMap] = await Promise.all([
-        getClientCredentialsToken(),
-        loadAllProfilesMap(),
-        loadAllDiscordProfilesMap(),
-      ]);
+      // Check L2 Runtime Cache for upstream Purdue Hackers ID members before paginating ID API
+      let cachedUpstream = !forceRefresh
+        ? await runtimeCache.get<UpstreamMembersCachePayload>(UPSTREAM_MEMBERS_CACHE_KEY)
+        : undefined;
 
-      const allMembers: DirectoryMember[] = [];
-      let cursor: string | null = null;
-      let page = 0;
+      if (!cachedUpstream || Date.now() - cachedUpstream.fetchedAt >= CACHE_TTL_MS) {
+        const token = await getClientCredentialsToken();
+        const allMembers: DirectoryMember[] = [];
+        let cursor: string | null = null;
+        let page = 0;
 
-      do {
-        page++;
-        if (page > MAX_PAGES) {
-          throw new Error('Directory pagination exceeded safety threshold of 100 pages');
-        }
+        do {
+          page++;
+          if (page > MAX_PAGES) {
+            throw new Error('Directory pagination exceeded safety threshold of 100 pages');
+          }
 
-        const url = new URL(`${config.idBase}/api/directory/users`);
-        url.searchParams.set('limit', '100');
-        if (cursor) {
-          url.searchParams.set('cursor', cursor);
-        }
+          const url = new URL(`${config.idBase}/api/directory/users`);
+          url.searchParams.set('limit', '100');
+          if (cursor) {
+            url.searchParams.set('cursor', cursor);
+          }
 
-        const res = await fetch(url.toString(), {
-          headers: {
-            Authorization: `Bearer ${token}`,
-            Accept: 'application/json',
-          },
-          signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
-        });
+          const res = await fetch(url.toString(), {
+            headers: {
+              Authorization: `Bearer ${token}`,
+              Accept: 'application/json',
+            },
+            signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+          });
 
-        if (!res.ok) {
-          const text = await res.text();
-          throw new Error(`Directory query failed (${res.status}): ${text}`);
-        }
+          if (!res.ok) {
+            const text = await res.text();
+            throw new Error(`Directory query failed (${res.status}): ${text}`);
+          }
 
-        const data = (await res.json()) as {
-          users: DirectoryMember[];
-          next_cursor: string | null;
+          const data = (await res.json()) as {
+            users: DirectoryMember[];
+            next_cursor: string | null;
+          };
+
+          for (const user of data.users) {
+            if (!user.banned) {
+              const publicRoles = (user.roles || []).filter((r) => r.toLowerCase() !== 'admin');
+              allMembers.push({
+                ...user,
+                roles: publicRoles,
+              });
+            }
+          }
+
+          cursor = data.next_cursor;
+        } while (cursor);
+
+        cachedUpstream = {
+          members: allMembers,
+          fetchedAt: Date.now(),
         };
 
-        for (const user of data.users) {
-          if (!user.banned) {
-            const publicRoles = (user.roles || []).filter((r) => r.toLowerCase() !== 'admin');
-            allMembers.push({
-              ...user,
-              roles: publicRoles,
-            });
+        await runtimeCache.set<UpstreamMembersCachePayload>(
+          UPSTREAM_MEMBERS_CACHE_KEY,
+          cachedUpstream,
+          {
+            ttlMs: CACHE_TTL_MS,
+            tags: [DIRECTORY_UPSTREAM_TAG],
+            name: 'directory-upstream-members',
           }
-        }
-
-        cursor = data.next_cursor;
-      } while (cursor);
+        );
+      }
 
       upstreamMembersCache = {
-        members: allMembers,
-        fetchedAt: Date.now(),
+        members: cachedUpstream.members,
+        fetchedAt: cachedUpstream.fetchedAt,
       };
 
-      const snapshot = buildDirectorySnapshot(allMembers, Date.now(), profilesMap, discordMap);
+      const discordIds = cachedUpstream.members
+        .map((m) => m.discord_id?.trim())
+        .filter((id): id is string => Boolean(id));
+
+      const [profilesMap, discordMap] = await Promise.all([
+        loadAllProfilesMap(true),
+        loadAllDiscordProfilesMap(forceRefresh, false, discordIds),
+      ]);
+
+      localProfilesUpdatedAt = Date.now();
+      await runtimeCache.set<DirectorySyncMeta>(
+        DIRECTORY_SYNC_META_KEY,
+        {
+          upstreamFetchedAt: cachedUpstream.fetchedAt,
+          profilesUpdatedAt: localProfilesUpdatedAt,
+        },
+        { ttlMs: CACHE_TTL_MS, tags: [DIRECTORY_UPSTREAM_TAG, DIRECTORY_PROFILES_TAG] }
+      );
+
+      const snapshot = buildDirectorySnapshot(
+        cachedUpstream.members,
+        cachedUpstream.fetchedAt,
+        profilesMap,
+        discordMap
+      );
       if (invalidationEpoch !== startEpoch) {
         snapshot.fetchedAt = 0;
       }
@@ -639,25 +733,22 @@ export function isMemberActiveInSnapshot(sub: string): boolean | null {
 }
 
 export async function ensureMemberActive(sub: string): Promise<boolean | null> {
-  const now = Date.now();
-  if (
-    !directoryCache ||
-    directoryCache.fetchedAt === 0 ||
-    now - directoryCache.fetchedAt >= CACHE_TTL_MS
-  ) {
-    try {
-      await getDirectorySnapshot(directoryCache?.fetchedAt === 0);
-    } catch {
-      // Fall through to cached state if upstream is temporarily unreachable
+  try {
+    // Always go through getDirectorySnapshot so L2 DIRECTORY_SYNC_META_KEY is checked across isolates
+    const snapshot = await getDirectorySnapshot(directoryCache?.fetchedAt === 0);
+    if (!snapshot || snapshot.members.length === 0) {
+      return null;
     }
+    return snapshot.bySub.has(sub.toLowerCase());
+  } catch {
+    if (!directoryCache || directoryCache.members.length === 0) {
+      return null;
+    }
+    return directoryCache.bySub.has(sub.toLowerCase());
   }
-  if (!directoryCache || directoryCache.members.length === 0) {
-    return null;
-  }
-  return directoryCache.bySub.has(sub.toLowerCase());
 }
 
-export function invalidateDirectoryCache(): void {
+export async function invalidateDirectoryCache(): Promise<void> {
   invalidationEpoch++;
   // Keep tokenCache intact - M2M client_credentials token is still valid for 1 hour
   // Retain upstreamMembersCache until new members are fetched so getRawMemberBySub doesn't drop to null during revalidation
@@ -667,6 +758,11 @@ export function invalidateDirectoryCache(): void {
       fetchedAt: 0,
     };
   }
+  await Promise.all([
+    runtimeCache.expireTag(DIRECTORY_UPSTREAM_TAG),
+    runtimeCache.delete(UPSTREAM_MEMBERS_CACHE_KEY),
+    runtimeCache.delete(DIRECTORY_SYNC_META_KEY),
+  ]);
   console.log('[Directory API] Directory snapshot marked stale for revalidation');
 }
 

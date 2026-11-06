@@ -44,7 +44,7 @@ export const POST: APIRoute = async ({ request }) => {
     const raw = await readBodyWithLimit(request, MAX_WEBHOOK_BYTES);
     const payload = raw ? JSON.parse(raw) : {};
     console.log('[Webhook] Received ID webhook event:', payload.event || 'unspecified');
-    invalidateDirectoryCache();
+    await invalidateDirectoryCache();
 
     return new Response(JSON.stringify({ ok: true, invalidated: true }), {
       status: 200,

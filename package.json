@@ -11,13 +11,13 @@
     "preview": "astro preview",
     "test": "bun test",
     "typecheck": "tsc --noEmit",
-    "astro": "astro",
-    "db:refresh:discord": "bun scripts/refresh-discord.ts"
+    "astro": "astro"
   },
   "dependencies": {
-    "@astrojs/node": "^11.1.11",
+    "@astrojs/vercel": "^11.0.20",
     "@libsql/client": "^0.18.0",
     "@tailwindcss/vite": "4.3.0",
+    "@vercel/functions": "^3.11.0",
     "astro": "^7.4.5",
     "drizzle-orm": "^0.45.4",
     "jose": "^6.2.15",

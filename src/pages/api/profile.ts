@@ -126,8 +126,15 @@ export const POST: APIRoute = async ({ request, locals, url }) => {
     );
   }
 
-  if ((await ensureMemberActive(user.sub)) === false) {
+  const activeStatus = await ensureMemberActive(user.sub);
+  if (activeStatus === false) {
     return Response.json({ error: 'Account suspended' }, { status: 403 });
+  }
+  if (activeStatus === null) {
+    return Response.json(
+      { error: 'Unable to verify account status. Please try again shortly.' },
+      { status: 503 }
+    );
   }
 
   let rawBody: string;
@@ -161,8 +168,10 @@ export const POST: APIRoute = async ({ request, locals, url }) => {
 
   try {
     const saved = await upsertMemberProfile(user.sub, validation.data);
-    refreshDirectorySnapshotProfiles(user.sub);
-    return Response.json({ ok: true, profile: saved });
+    await refreshDirectorySnapshotProfiles(user.sub);
+    const res = Response.json({ ok: true, profile: saved });
+    res.headers.set('Clear-Site-Data', '"cache"');
+    return res;
   } catch (err) {
     console.error('[Profile API] Failed to save profile:', err);
     return Response.json(

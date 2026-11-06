@@ -22,7 +22,7 @@ Built with **Bun** and **Astro (SSR)**, powered by **Purdue Hackers ID**, and st
 - **Database & ORM**: LibSQL (`@libsql/client`) + [Drizzle ORM](https://orm.drizzle.team) (SQLite/Turso)
 - **Styling**: Tailwind CSS v4 + Purdue Hackers Theme (`ph.css`)
 - **Search Engine**: [MiniSearch](https://github.com/lucaong/minisearch)
-- **Adapter**: `@astrojs/node` (standalone server, compatible with Bun and Node)
+- **Adapter**: `@astrojs/vercel` (serverless deployment on Vercel)
 
 ## 🚀 Getting Started
 
