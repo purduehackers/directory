@@ -1,0 +1,207 @@
+---
+import {
+  getVisibleEmails,
+  getVisiblePhone,
+  type DirectoryMember,
+} from '../lib/server/id-directory';
+import { formatPhone } from '../lib/phone';
+import Badge from './ph/Badge.astro';
+import Icon from './ph/Icon.astro';
+
+type Props = {
+  member: DirectoryMember;
+  isSelf?: boolean;
+};
+
+const { member, isSelf = false } = Astro.props;
+
+const grad = member.graduation_year
+  ? `'${String(member.graduation_year).slice(-2)}`
+  : null;
+
+function roleColor(role: string): 'yellow' | 'purple' | 'default' {
+  switch (role.toLowerCase()) {
+    case 'organizer':
+      return 'yellow';
+    case 'alumni':
+      return 'purple';
+    default:
+      return 'default';
+  }
+}
+
+const visibleRoles = (member.roles || []).filter(
+  (r) => r.toLowerCase() !== 'admin'
+);
+
+const visibleEmails = getVisibleEmails(member);
+const primaryVisibleEmail = member.email || visibleEmails[0]?.email || null;
+const visiblePhone = member.phone_number || getVisiblePhone(member);
+const formattedPhone = formatPhone(visiblePhone);
+
+const cleanDiscordId = member.discord_id?.trim() || null;
+const discordHandle = member.discord?.username
+  ? `@${member.discord.username}`
+  : null;
+const discordGuildNick = member.discord?.guildNickname || null;
+const discordProfileUrl = cleanDiscordId
+  ? `https://discord.com/users/${encodeURIComponent(cleanDiscordId)}`
+  : null;
+const discordSearchData = [discordHandle, discordGuildNick, cleanDiscordId].filter(Boolean).join(' ');
+---
+
+<article
+  class="member-card group relative flex flex-col justify-between border border-foreground bg-card p-5 transition-transform duration-100 ease-out hover:-translate-y-0.5 hover:shadow-[4px_4px_0_0_currentColor]"
+  data-member-sub={member.sub}
+  data-name={member.name}
+  data-username={member.preferred_username}
+  data-roles={visibleRoles.join(',')}
+  data-grad={member.graduation_year ?? ''}
+  data-email={primaryVisibleEmail || ''}
+  data-phone={[visiblePhone, formattedPhone].filter(Boolean).join(' ')}
+  data-discord={discordSearchData}
+>
+  <div>
+    <!-- Header: Avatar + Identity -->
+    <div class="flex items-start gap-3.5">
+      {member.picture ? (
+        <img
+          src={member.picture}
+          alt=""
+          width="48"
+          height="48"
+          loading="lazy"
+          decoding="async"
+          referrerpolicy="no-referrer"
+          class="size-12 shrink-0 border border-foreground object-cover bg-muted"
+        />
+      ) : (
+        <div aria-hidden="true" class="size-12 shrink-0 border border-foreground bg-ph-yellow text-ph-black flex items-center justify-center font-mono text-sm font-bold">
+          {member.preferred_username.slice(0, 2).toUpperCase()}
+        </div>
+      )}
+
+      <div class="min-w-0 flex-1">
+        <h3 class="ph-headline text-xl leading-tight truncate">
+          <a
+            href={`/u/${encodeURIComponent(member.preferred_username)}`}
+            class="card-link text-foreground no-underline hover:text-ph-purple dark:hover:text-ph-yellow transition-colors"
+          >
+            {member.name || member.preferred_username}
+          </a>
+        </h3>
+
+        <div class="flex items-center gap-2 mt-0.5">
+          <span class="font-mono text-xs font-semibold text-foreground/85 truncate">
+            @{member.preferred_username}
+          </span>
+          {grad && (
+            <span class="font-mono text-xs font-bold px-1 border border-foreground bg-card shrink-0">
+              {grad}
+            </span>
+          )}
+        </div>
+
+        {member.profile?.headline && (
+          <p class="font-sans text-xs text-foreground/80 mt-1.5 line-clamp-1 font-medium">
+            {member.profile.headline}
+          </p>
+        )}
+
+        {member.profile?.location && (
+          <div class="inline-flex items-center gap-1 text-[11px] font-mono text-foreground/70 mt-1">
+            <Icon name="location-pin" class="size-3" />
+            <span class="truncate">{member.profile.location}</span>
+          </div>
+        )}
+      </div>
+    </div>
+
+    <!-- Badges Row -->
+    <div class="flex flex-wrap gap-1.5 mt-3.5">
+      {isSelf && (
+        <Badge color="outline" class="border-ph-purple text-ph-purple dark:border-ph-yellow dark:text-ph-yellow">
+          You
+        </Badge>
+      )}
+      {visibleRoles && visibleRoles.length > 0 ? (
+        visibleRoles.map((r) => (
+          <Badge color={roleColor(r)}>
+            {r}
+          </Badge>
+        ))
+      ) : (
+        <Badge color="outline">member</Badge>
+      )}
+    </div>
+  </div>
+
+  <!-- Contact Actions & Footer (elevated so card-link doesn't block them) -->
+  {(primaryVisibleEmail || visiblePhone || member.discord_id) && (
+    <footer class="mt-4 pt-3 border-t border-border flex flex-wrap items-center gap-3 text-xs font-mono">
+      {primaryVisibleEmail && (
+        <a
+          href={`mailto:${primaryVisibleEmail}`}
+          class="interactive-ctrl inline-flex items-center gap-1.5 text-foreground hover:text-ph-purple dark:hover:text-ph-yellow hover:underline transition-colors"
+          title={`Email ${member.name} (${primaryVisibleEmail})`}
+        >
+          <Icon name="envelope" class="size-3.5" />
+          <span class="truncate max-w-[160px]">{primaryVisibleEmail}</span>
+        </a>
+      )}
+
+      {visiblePhone && (
+        <a
+          href={`tel:${visiblePhone.replace(/[^\d+]/g, '')}`}
+          class="interactive-ctrl inline-flex items-center gap-1.5 max-w-full text-foreground hover:text-ph-purple dark:hover:text-ph-yellow hover:underline transition-colors"
+          title={`Call ${member.name} (${formattedPhone})`}
+        >
+          <Icon name="phone" class="size-3.5 shrink-0" />
+          <span class="whitespace-nowrap truncate">{formattedPhone}</span>
+        </a>
+      )}
+
+      {cleanDiscordId && discordProfileUrl && (
+        <a
+          href={discordProfileUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          class="interactive-ctrl inline-flex items-center gap-1.5 text-foreground hover:text-ph-purple dark:hover:text-ph-yellow hover:underline transition-colors"
+          title={
+            discordGuildNick
+              ? `${discordGuildNick} (${discordHandle})`
+              : discordHandle
+                ? `Discord: ${discordHandle}`
+                : 'Open Discord Profile'
+          }
+        >
+          <Icon name="discord" class="size-3.5 text-ph-purple dark:text-ph-periwinkle shrink-0" />
+          <span class="font-mono truncate max-w-[120px]">
+            {discordGuildNick ?? discordHandle ?? 'Discord ↗'}
+          </span>
+        </a>
+      )}
+    </footer>
+  )}
+</article>
+
+<style>
+  /* Modern Web Guidance Card pattern */
+  .member-card:has(a.card-link) {
+    position: relative;
+  }
+
+  .member-card a.card-link::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+  }
+
+  /* Elevate interactive elements so they remain clickable above stretched card-link */
+  .member-card .interactive-ctrl,
+  .member-card footer a,
+  .member-card footer button {
+    position: relative;
+    z-index: 1;
+  }
+</style>

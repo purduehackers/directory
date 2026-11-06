@@ -1,0 +1,115 @@
+---
+import Navbar from '../components/ph/Navbar.astro';
+import Footer from '../components/ph/Footer.astro';
+import Glider from '../components/ph/Glider.astro';
+import Link from '../components/ph/Link.astro';
+import Button from '../components/ph/Button.astro';
+import Badge from '../components/ph/Badge.astro';
+import ThemeScript from '../components/ph/ThemeScript.astro';
+import ThemeToggle from '../components/ph/ThemeToggle.astro';
+import '../styles/global.css';
+
+type Props = {
+  title?: string;
+  description?: string;
+};
+
+const {
+  title = 'Directory — Purdue Hackers',
+  description = 'Search and discover members in the Purdue Hackers community.',
+} = Astro.props;
+
+const user = Astro.locals.user;
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="light dark" />
+    <ThemeScript />
+    <link rel="icon" href="/favicon.ico" sizes="32x32" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <meta name="generator" content={Astro.generator} />
+    <title>{title}</title>
+    <meta name="description" content={description} />
+  </head>
+  <body class="min-h-screen bg-background font-sans text-foreground antialiased flex flex-col">
+    <!-- Top Bar -->
+    <header class="border-b border-foreground bg-background sticky top-0 z-30">
+      <div class="max-w-6xl mx-auto px-4 sm:px-6 py-3 flex items-center justify-between gap-4">
+        <a href="/" class="flex items-center gap-2.5 no-underline hover:opacity-80 transition-opacity">
+          <Glider class="size-7" />
+          <span class="ph-headline text-2xl tracking-wide">DIRECTORY</span>
+        </a>
+
+        <div class="flex items-center gap-2 sm:gap-3">
+          <ThemeToggle />
+          {user ? (
+            <div class="flex items-center gap-2 sm:gap-3">
+              <a
+                href={`/u/${encodeURIComponent(user.preferred_username)}`}
+                class="flex items-center gap-2 text-foreground no-underline hover:text-ph-purple dark:hover:text-ph-yellow transition-colors"
+                title="View your profile"
+              >
+                {user.picture ? (
+                  <img
+                    src={user.picture}
+                    alt=""
+                    width="28"
+                    height="28"
+                    referrerpolicy="no-referrer"
+                    class="size-7 border border-foreground object-cover bg-muted"
+                  />
+                ) : (
+                  <span class="size-7 border border-foreground bg-ph-yellow text-ph-black flex items-center justify-center font-mono text-xs font-bold">
+                    {user.preferred_username.slice(0, 2).toUpperCase()}
+                  </span>
+                )}
+                <span class="font-mono text-sm font-semibold hidden sm:inline">@{user.preferred_username}</span>
+              </a>
+              <form method="POST" action="/logout" class="inline m-0">
+                <button
+                  type="submit"
+                  class="border border-foreground bg-transparent px-2.5 py-1 font-mono text-xs font-semibold uppercase hover:bg-foreground hover:text-background transition-colors cursor-pointer"
+                >
+                  Sign out
+                </button>
+              </form>
+            </div>
+          ) : (
+            <a
+              href="/auth/login"
+              class="border border-foreground bg-foreground text-background px-3 py-1 font-mono text-xs font-semibold uppercase hover:bg-primary hover:text-primary-foreground transition-colors no-underline"
+            >
+              Sign in
+            </a>
+          )}
+        </div>
+      </div>
+    </header>
+
+    <!-- Main Content Area -->
+    <main class="flex-1 max-w-6xl w-full mx-auto px-4 sm:px-6 py-8">
+      <slot />
+    </main>
+
+    <!-- Footer -->
+    <div class="max-w-6xl w-full mx-auto px-4 sm:px-6">
+      <Footer
+        links={[
+          { label: 'Directory', href: '/' },
+          { label: 'Purdue Hackers', href: 'https://purduehackers.com' },
+          { label: 'ID', href: 'https://id.purduehackers.com' },
+          { label: 'GitHub', href: 'https://github.com/purduehackers' },
+          { label: 'Discord', href: 'https://discord.gg/purduehackers' },
+        ]}
+      >
+        <p class="mt-2 text-foreground/75 font-mono text-xs">
+          Built with Bun &amp; Astro. Pixel icons by HackerNoon under CC BY 4.0.
+        </p>
+      </Footer>
+    </div>
+  </body>
+</html>

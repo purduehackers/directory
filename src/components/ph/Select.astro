@@ -1,0 +1,33 @@
+---
+import type { HTMLAttributes } from "astro/types";
+
+type Props = HTMLAttributes<"select">;
+
+const { class: className, ...rest } = Astro.props;
+
+function extractClassNames(val: unknown): string {
+  if (!val) return "";
+  if (typeof val === "string") return val;
+  if (Array.isArray(val)) return val.map(extractClassNames).join(" ");
+  if (typeof val === "object") {
+    return Object.keys(val)
+      .filter((k) => (val as Record<string, unknown>)[k])
+      .join(" ");
+  }
+  return String(val);
+}
+
+const classStr = extractClassNames(className);
+const hasCustomWidth = /\b(w-|flex-1\b|flex-auto\b|flex-none\b|flex-initial\b)/.test(classStr);
+---
+
+<select
+  class:list={[
+    "h-10 min-w-0 border border-input bg-card px-3 font-sans text-[15px] text-card-foreground outline-none transition-colors duration-150 ease-quint focus-visible:border-foreground disabled:cursor-not-allowed disabled:opacity-40 aria-invalid:border-ph-orange cursor-pointer",
+    !hasCustomWidth && "w-full",
+    className,
+  ]}
+  {...rest}
+>
+  <slot />
+</select>

@@ -1,0 +1,23 @@
+---
+import { getMemberByUsername } from "../../../lib/server/id-directory";
+
+const { username } = Astro.params;
+if (!username) {
+    return Astro.redirect("/");
+}
+
+const viewer = Astro.locals.user;
+const member = await getMemberByUsername(username);
+
+const isSelf = Boolean(
+    member &&
+    viewer?.sub &&
+    viewer.sub.toLowerCase() === member.sub.toLowerCase()
+);
+
+if (isSelf) {
+    return Astro.redirect("/settings/profile");
+}
+
+return Astro.redirect(`/u/${encodeURIComponent(username)}`);
+---

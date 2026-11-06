@@ -1,0 +1,63 @@
+---
+import Layout from "../layouts/Layout.astro";
+import Glider from "../components/ph/Glider.astro";
+import DitherButton from "../components/ph/DitherButton.astro";
+import Callout from "../components/ph/Callout.astro";
+import { sanitizeReturnTo } from "../lib/server/session";
+
+const error = Astro.url.searchParams.get("error");
+const returnTo = sanitizeReturnTo(Astro.url.searchParams.get("returnTo"));
+
+const errorMessages: Record<string, string> = {
+    invalid_state: "Security check failed. Please try signing in again.",
+    auth_unavailable:
+        "Could not connect to Purdue Hackers ID. Please check that ID is running.",
+    missing_code_or_state: "Invalid response from authentication server.",
+    access_denied: "Sign-in request was canceled or access was denied.",
+    account_suspended:
+        "This account is not authorized to access the directory.",
+    auth_failed: "Authentication failed. Please try again.",
+};
+
+const displayError = error
+    ? errorMessages[error] || errorMessages.auth_failed
+    : null;
+---
+
+<Layout title="Sign In — Purdue Hackers Directory">
+    <div class="max-w-xl mx-auto py-12 sm:py-20 flex flex-col items-center text-center">
+        <!-- Icon / Mark -->
+        <div class="mb-6">
+            <Glider class="size-16 mx-auto text-foreground" />
+        </div>
+
+        <!-- Title & Tagline -->
+        <h1 class="ph-headline text-4xl sm:text-5xl tracking-wide uppercase mb-3">
+            DIRECTORY
+        </h1>
+        <p class="text-base sm:text-lg max-w-md mx-auto text-foreground mb-8">
+            A place for Purdue Hackers members and alumni to find each other and
+            get in touch.
+        </p>
+
+        {displayError && (
+            <div class="w-full text-left mb-8">
+                <Callout title="Sign-in problem" icon="exclamation-triangle">
+                    {displayError}
+                </Callout>
+            </div>
+        )}
+
+        <!-- Sign-in CTA with Dither Button -->
+        <div class="w-full flex flex-col items-center">
+            <DitherButton
+                href={`/auth/login?returnTo=${encodeURIComponent(returnTo)}`}
+                cols={16}
+                rows={6}
+                class="text-base px-8 py-3.5"
+            >
+                Sign in with Purdue Hackers
+            </DitherButton>
+        </div>
+    </div>
+</Layout>

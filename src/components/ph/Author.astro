@@ -1,0 +1,32 @@
+---
+type Props = {
+  name: string;
+  avatar?: string;
+  href?: string;
+  size?: "sm"| "md";
+  class?: string;
+};
+
+const { name, avatar, href, size = "md", class: className } = Astro.props;
+const Tag = href ? "a": "span";
+const px = size === "sm"? 16 : 28;
+---
+
+<Tag
+  href={href}
+  class:list={[
+    "inline-flex items-center gap-2 font-pixel uppercase no-underline",
+    size === "sm"? "gap-1.5 text-[11px] tracking-wide": "text-sm",
+    href && "hover:underline",
+    className,
+  ]}
+>
+  {
+    avatar ? (
+      <img src={avatar} width={px} height={px} alt="" class="shrink-0 border border-foreground" loading="lazy" decoding="async"/>
+    ) : (
+      <span class="shrink-0 border border-foreground bg-ph-yellow" style={`width:${px}px;height:${px}px`} />
+    )
+  }
+  {name}
+</Tag>

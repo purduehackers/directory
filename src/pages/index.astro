@@ -1,16 +1,395 @@
 ---
+import Layout from "../layouts/Layout.astro";
+import MemberCard from "../components/MemberCard.astro";
+import Icon from "../components/ph/Icon.astro";
+import { getDirectorySnapshot } from "../lib/server/id-directory";
+import {
+    filterAndSearchMembers,
+    type SortOption,
+} from "../lib/server/search";
+
+const query = Astro.url.searchParams.get("q") || "";
+const role = Astro.url.searchParams.get("role") || "all";
+const gradYear = Astro.url.searchParams.get("gradYear") || "all";
+const sort = (Astro.url.searchParams.get("sort") as SortOption | null) || (query ? "relevance" : "name_asc");
+
+let snapshot: Awaited<ReturnType<typeof getDirectorySnapshot>> | null = null;
+let loadError: string | null = null;
+
+try {
+    snapshot = await getDirectorySnapshot();
+} catch (err: any) {
+    console.error("[Index] Failed to load directory snapshot:", err);
+    loadError = "Unable to load the member directory from the ID service.";
+}
+
+const allMembers = snapshot?.members ?? [];
+const filteredMembers = snapshot
+    ? filterAndSearchMembers(snapshot, {
+        query,
+        role,
+        gradYear,
+        sort,
+    })
+    : [];
+
+const availableGradYears = snapshot?.gradYears ?? [];
+const viewer = Astro.locals.user;
+const hasActiveFilters = Boolean(
+    query || role !== "all" || gradYear !== "all" || (query ? sort !== "relevance" : sort !== "name_asc"),
+);
+
+const roleOptions = [
+    { id: "all", label: "All" },
+    { id: "organizer", label: "Organizers" },
+    { id: "alumni", label: "Alumni" },
+    { id: "member", label: "Members" },
+];
 ---
 
-<html lang="en">
-	<head>
-		<meta charset="utf-8" />
-		<link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-		<link rel="icon" href="/favicon.ico" />
-		<meta name="viewport" content="width=device-width" />
-		<meta name="generator" content={Astro.generator} />
-		<title>Astro</title>
-	</head>
-	<body>
-		<h1>Astro</h1>
-	</body>
-</html>
+<Layout title="Member Directory — Purdue Hackers">
+    <div class="flex flex-col gap-8">
+        <!-- Header -->
+        <div class="border-b border-foreground pb-6">
+            <div class="flex flex-col sm:flex-row sm:items-end justify-between gap-4">
+                <div>
+                    <h1 class="ph-headline text-4xl sm:text-6xl tracking-wide uppercase">
+                        MEMBERS
+                    </h1>
+                    <p class="font-sans text-base text-foreground/85 mt-1">
+                        Search and connect with Purdue Hackers members and
+                        alumni.
+                    </p>
+                </div>
+
+                <div class="flex items-center gap-2 self-start sm:self-end">
+                    <span id="member-counter-badge" class="font-mono text-xs font-semibold px-2 py-1 border border-foreground bg-card">
+                        <span id="member-count-num">{filteredMembers.length}</span>{" "}
+                        <span id="member-count-unit">{filteredMembers.length === 1 ? "member" : "members"}</span>
+                    </span>
+                    {allMembers.length > 0 &&
+                        allMembers.length !== filteredMembers.length && (
+                            <span id="member-total-indicator" class="font-mono text-xs text-foreground/75">
+                                (of {allMembers.length} total)
+                            </span>
+                        )}
+                </div>
+            </div>
+        </div>
+
+        {loadError && (
+            <div class="border-2 border-dashed border-ph-orange bg-ph-yellow/20 dark:bg-ph-orange/15 p-5">
+                <p class="font-mono text-xs font-bold uppercase text-ph-orange mb-1">
+                    Directory Service Warning
+                </p>
+                <p class="font-sans text-sm text-foreground">
+                    {loadError}. Please ensure ID is running and client
+                    credentials have been authorized.
+                </p>
+            </div>
+        )}
+
+        <!-- Search & Filter Controls -->
+        <form
+            id="directory-filter-form"
+            action="/"
+            method="GET"
+            class="border border-foreground bg-card p-4 sm:p-5 flex flex-col gap-4"
+        >
+            <!-- Row 1: Search Bar -->
+            <div class="flex flex-col sm:flex-row gap-2">
+                <div class="relative flex-1">
+                    <label
+                        for="search-input"
+                        class="ph-subheadline text-xs block mb-1"
+                    >
+                        Search by name, username, email, phone, discord or role
+                    </label>
+                    <div class="relative flex items-center">
+                        <span class="absolute left-3 text-foreground/60 pointer-events-none">
+                            <Icon name="search" class="size-4" />
+                        </span>
+                        <input
+                            type="search"
+                            id="search-input"
+                            name="q"
+                            value={query}
+                            placeholder="e.g. Artus, testy, organizer, 2026..."
+                            autocomplete="off"
+                            autocorrect="off"
+                            autocapitalize="off"
+                            spellcheck="false"
+                            class="w-full h-11 pl-9 pr-3 border border-foreground bg-background font-sans text-sm text-foreground outline-none focus:border-ph-purple dark:focus:border-ph-yellow"
+                        />
+                    </div>
+                </div>
+
+                <div class="flex items-end gap-2">
+                    <button
+                        type="submit"
+                        class="h-11 px-5 border border-foreground bg-foreground text-background font-mono text-xs font-bold uppercase hover:bg-primary hover:text-primary-foreground transition-colors cursor-pointer flex items-center justify-center gap-1.5"
+                    >
+                        <Icon name="search" class="size-3.5" />
+                        <span>Search</span>
+                    </button>
+
+                    {hasActiveFilters && (
+                        <a
+                            href="/"
+                            class="h-11 px-3 border border-foreground bg-transparent font-mono text-xs font-semibold uppercase hover:bg-foreground hover:text-background transition-colors flex items-center justify-center no-underline shrink-0"
+                            title="Reset all filters"
+                        >
+                            Reset
+                        </a>
+                    )}
+                </div>
+            </div>
+
+            <!-- Row 2: Role Pills & Secondary Filters -->
+            <div class="pt-3 border-t border-border flex flex-wrap items-center justify-between gap-3">
+                <!-- Role Radios / Pills -->
+                <fieldset class="flex flex-wrap items-center gap-1.5 m-0 p-0 border-0">
+                    <legend class="sr-only">Filter by Role</legend>
+                    {roleOptions.map((opt) => (
+                        <label
+                            class:list={[
+                                "px-2.5 py-1 font-mono text-xs font-semibold uppercase cursor-pointer border transition-colors select-none focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-ph-purple dark:focus-within:outline-ph-yellow",
+                                role === opt.id
+                                    ? "border-foreground bg-foreground text-background"
+                                    : "border-foreground/40 bg-background text-foreground hover:border-foreground",
+                            ]}
+                        >
+                            <input
+                                type="radio"
+                                name="role"
+                                value={opt.id}
+                                checked={role === opt.id}
+                                class="sr-only"
+                                data-role-radio
+                            />
+                            {opt.label}
+                        </label>
+                    ))}
+                </fieldset>
+
+                <!-- Secondary Filters: Grad Year + Sort -->
+                <div class="flex flex-wrap items-center gap-3">
+                    <!-- Grad Year Filter -->
+                    {availableGradYears.length > 0 && (
+                        <div class="flex items-center gap-1.5">
+                            <label
+                                for="grad-year-select"
+                                class="font-mono text-xs font-semibold uppercase"
+                            >
+                                Grad Year:
+                            </label>
+                            <select
+                                id="grad-year-select"
+                                name="gradYear"
+                                class="h-8 px-2 border border-foreground bg-background font-mono text-xs uppercase outline-none cursor-pointer"
+                                onchange="this.form.submit()"
+                            >
+                                <option
+                                    value="all"
+                                    selected={gradYear === "all"}
+                                >
+                                    All Years
+                                </option>
+                                {availableGradYears.map((yr) => (
+                                    <option
+                                        value={String(yr)}
+                                        selected={gradYear === String(yr)}
+                                    >
+                                        Class of {yr}
+                                    </option>
+                                ))}
+                            </select>
+                        </div>
+                    )}
+
+                    <!-- Sorter -->
+                    <div class="flex items-center gap-1.5">
+                        <label
+                            for="sort-select"
+                            class="font-mono text-xs font-semibold uppercase"
+                        >
+                            Sort:
+                        </label>
+                        <select
+                            id="sort-select"
+                            name="sort"
+                            class="h-8 px-2 border border-foreground bg-background font-mono text-xs uppercase outline-none cursor-pointer"
+                            onchange="this.form.submit()"
+                        >
+                            <option
+                                value="relevance"
+                                selected={sort === "relevance"}
+                            >
+                                Best Match
+                            </option>
+                            <option
+                                value="name_asc"
+                                selected={sort === "name_asc"}
+                            >
+                                Name (A–Z)
+                            </option>
+                            <option
+                                value="name_desc"
+                                selected={sort === "name_desc"}
+                            >
+                                Name (Z–A)
+                            </option>
+                            <option
+                                value="grad_desc"
+                                selected={sort === "grad_desc"}
+                            >
+                                Grad Year (Newest)
+                            </option>
+                            <option
+                                value="grad_asc"
+                                selected={sort === "grad_asc"}
+                            >
+                                Grad Year (Oldest)
+                            </option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+        </form>
+
+        <!-- Dynamic Empty State for Client-Side Filtering -->
+        <div id="client-empty-state" class="hidden border border-foreground bg-card p-12 text-center my-6">
+            <h2 class="ph-headline text-2xl mb-2">NO MEMBERS FOUND</h2>
+            <p class="font-sans text-sm text-foreground/80 mb-6 max-w-md mx-auto">
+                No Purdue Hackers members matched your search query. Try typing a different term or clear the search.
+            </p>
+            <button
+                type="button"
+                id="clear-client-search-btn"
+                class="border border-foreground bg-foreground text-background px-4 py-2 font-mono text-xs font-bold uppercase hover:bg-primary hover:text-primary-foreground cursor-pointer inline-block"
+            >
+                Clear search
+            </button>
+        </div>
+
+        <!-- Member Cards Grid -->
+        {filteredMembers.length === 0 ? (
+            <div class="border border-foreground bg-card p-12 text-center my-6">
+                <h2 class="ph-headline text-2xl mb-2">NO MEMBERS FOUND</h2>
+                <p class="font-sans text-sm text-foreground/80 mb-6 max-w-md mx-auto">
+                    No Purdue Hackers members matched your search criteria. Try
+                    a different search term or clear the active filters.
+                </p>
+                <a
+                    href="/"
+                    class="border border-foreground bg-foreground text-background px-4 py-2 font-mono text-xs font-bold uppercase hover:bg-primary hover:text-primary-foreground no-underline inline-block"
+                >
+                    Clear filters
+                </a>
+            </div>
+        ) : (
+            <div
+                id="members-grid"
+                class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4"
+            >
+                {filteredMembers.map((member) => (
+                    <MemberCard
+                        member={member}
+                        isSelf={
+                            viewer?.preferred_username?.toLowerCase() ===
+                                member.preferred_username.toLowerCase() ||
+                            viewer?.sub === member.sub
+                        }
+                    />
+                ))}
+            </div>
+        )}
+    </div>
+</Layout>
+
+<script>
+    // Progressive enhancement: Instant client-side search filtering
+    const searchInput = document.getElementById("search-input") as HTMLInputElement | null;
+    const form = document.getElementById("directory-filter-form") as HTMLFormElement | null;
+    const cards = document.querySelectorAll<HTMLElement>(".member-card");
+    const countNum = document.getElementById("member-count-num");
+    const countUnit = document.getElementById("member-count-unit");
+    const clientEmptyState = document.getElementById("client-empty-state");
+    const membersGrid = document.getElementById("members-grid");
+    const clearBtn = document.getElementById("clear-client-search-btn");
+
+    // Handle role filter radio selection on click without trapping keyboard arrow navigation
+    document.querySelectorAll<HTMLInputElement>("[data-role-radio]").forEach((radio) => {
+        radio.addEventListener("click", () => {
+            form?.submit();
+        });
+    });
+
+    if (clearBtn && searchInput) {
+        clearBtn.addEventListener("click", () => {
+            const searchParams = new URLSearchParams(window.location.search);
+            if (searchParams.has("q")) {
+                searchParams.delete("q");
+                const queryStr = searchParams.toString();
+                window.location.href = window.location.pathname + (queryStr ? `?${queryStr}` : "");
+            } else {
+                searchInput.value = "";
+                searchInput.dispatchEvent(new Event("input"));
+                searchInput.focus();
+            }
+        });
+    }
+
+    if (searchInput && cards.length > 0) {
+        const indexedCards = Array.from(cards).map((card) => {
+            const phone = (card.getAttribute("data-phone") || "").toLowerCase();
+            return {
+                el: card,
+                name: (card.getAttribute("data-name") || "").toLowerCase(),
+                username: (card.getAttribute("data-username") || "").toLowerCase(),
+                roles: (card.getAttribute("data-roles") || "").toLowerCase(),
+                grad: card.getAttribute("data-grad") || "",
+                email: (card.getAttribute("data-email") || "").toLowerCase(),
+                phone,
+                phoneDigits: phone.replace(/\D/g, ""),
+                discord: (card.getAttribute("data-discord") || "").toLowerCase(),
+            };
+        });
+
+        searchInput.addEventListener("input", () => {
+            const q = searchInput.value.toLowerCase().trim();
+            const isPhoneLikeQuery = /^[+\d\s().-]+$/.test(q);
+            const qDigits = isPhoneLikeQuery ? q.replace(/\D/g, "") : "";
+            let visibleCount = 0;
+
+            indexedCards.forEach(({ el, name, username, roles, grad, email, phone, phoneDigits, discord }) => {
+                const matches =
+                    !q ||
+                    name.includes(q) ||
+                    username.includes(q) ||
+                    roles.includes(q) ||
+                    grad.includes(q) ||
+                    email.includes(q) ||
+                    phone.includes(q) ||
+                    (qDigits.length >= 3 && phoneDigits.includes(qDigits)) ||
+                    discord.includes(q);
+
+                el.style.display = matches ? "" : "none";
+                if (matches) visibleCount++;
+            });
+
+            if (countNum) countNum.textContent = String(visibleCount);
+            if (countUnit) countUnit.textContent = visibleCount === 1 ? "member" : "members";
+
+            if (clientEmptyState && membersGrid) {
+                if (visibleCount === 0 && q) {
+                    clientEmptyState.classList.remove("hidden");
+                    membersGrid.classList.add("hidden");
+                } else {
+                    clientEmptyState.classList.add("hidden");
+                    membersGrid.classList.remove("hidden");
+                }
+            }
+        });
+    }
+</script>

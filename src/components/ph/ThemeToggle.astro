@@ -1,0 +1,51 @@
+---
+import Icon from "./Icon.astro";
+
+type Props = {
+  class?: string;
+};
+
+const { class: className } = Astro.props;
+---
+
+<button
+  type="button"
+  data-ph-theme-toggle
+  aria-label="Toggle dark mode"
+  title="Toggle dark mode (Middle-click to follow system)"
+  class:list={[
+    "inline-flex size-7 shrink-0 cursor-pointer items-center justify-center border border-foreground bg-background text-foreground transition-[background-color,color,transform] duration-150 ease-quint hover:bg-foreground hover:text-background active:scale-[0.97]",
+    className,
+  ]}
+>
+  <Icon name="sun" class="size-4 dark:hidden" />
+  <Icon name="moon" class="hidden size-3.5 -rotate-6 dark:block" />
+</button>
+
+<script>
+  import { applyTheme, getTheme, setTheme, toggleTheme, THEME_KEY } from "./theme";
+
+  for (const b of document.querySelectorAll<HTMLButtonElement>("[data-ph-theme-toggle]")) {
+    b.addEventListener("click", () => toggleTheme());
+    b.addEventListener("auxclick", (e) => {
+      if (e.button === 1) {
+        e.preventDefault();
+        setTheme(null);
+      }
+    });
+  }
+
+  // Follow system theme changes when not manually overridden
+  if (typeof matchMedia === "function") {
+    matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => {
+      applyTheme(getTheme());
+    });
+  }
+
+  // Synchronize across tabs
+  window.addEventListener("storage", (e) => {
+    if (e.key === THEME_KEY) {
+      applyTheme(getTheme());
+    }
+  });
+</script>

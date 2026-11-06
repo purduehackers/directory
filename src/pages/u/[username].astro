@@ -1,0 +1,534 @@
+---
+import Layout from "../../layouts/Layout.astro";
+import BackLink from "../../components/ph/BackLink.astro";
+import Badge from "../../components/ph/Badge.astro";
+import Icon from "../../components/ph/Icon.astro";
+import Button from "../../components/ph/Button.astro";
+import Separator from "../../components/ph/Separator.astro";
+import {
+  getMemberByUsername,
+  getVisibleEmails,
+  getVisiblePhone,
+} from "../../lib/server/id-directory";
+import { formatPhone } from "../../lib/phone";
+import { config } from "../../lib/server/config";
+import { sanitizeHttpUrl } from "../../lib/server/profile-validation";
+import type { IconName } from "../../components/ph/icons";
+
+const { username } = Astro.params;
+if (!username) {
+    return Astro.redirect("/");
+}
+
+const member = await getMemberByUsername(username);
+if (!member) {
+    Astro.response.status = 404;
+}
+
+const visibleEmails = member ? getVisibleEmails(member) : [];
+const visiblePhone = member?.phone_number || (member ? getVisiblePhone(member) : null);
+const formattedPhone = formatPhone(visiblePhone);
+const safeAvatarUrl = member?.picture
+    ? sanitizeHttpUrl(member.picture, !config.isProduction).url
+    : null;
+
+const viewer = Astro.locals.user;
+const isSelf = Boolean(
+    member &&
+    viewer?.sub &&
+    viewer.sub.toLowerCase() === member.sub.toLowerCase()
+);
+
+function roleColor(role: string): "yellow" | "purple" | "default" {
+    switch (role.toLowerCase()) {
+        case "organizer":
+            return "yellow";
+        case "alumni":
+            return "purple";
+        default:
+            return "default";
+    }
+}
+
+const visibleRoles = (member?.roles || []).filter(
+    (r) => r.toLowerCase() !== "admin",
+);
+
+const profile = member?.profile;
+
+function formatInitialLocalTime(tz: string | null | undefined): string | null {
+    if (!tz) return null;
+    try {
+        return new Intl.DateTimeFormat("en-US", {
+            timeZone: tz,
+            hour: "numeric",
+            minute: "2-digit",
+            timeZoneName: "short",
+        }).format(new Date());
+    } catch {
+        return null;
+    }
+}
+
+const serverLocalTime = formatInitialLocalTime(profile?.timezone);
+
+type SocialItem = {
+    platform: string;
+    url: string;
+    icon: IconName;
+    label: string;
+};
+
+const socialItems: SocialItem[] = [];
+if (profile?.websiteUrl) {
+    socialItems.push({
+        platform: "website",
+        url: profile.websiteUrl,
+        icon: "globe",
+        label: "Website",
+    });
+}
+if (profile?.socials) {
+    const s = profile.socials;
+    if (s.github) socialItems.push({ platform: "github", url: s.github, icon: "github", label: "GitHub" });
+    if (s.x) socialItems.push({ platform: "x", url: s.x, icon: "x", label: "X" });
+    if (s.bluesky) socialItems.push({ platform: "bluesky", url: s.bluesky, icon: "bluesky", label: "Bluesky" });
+    if (s.youtube) socialItems.push({ platform: "youtube", url: s.youtube, icon: "youtube", label: "YouTube" });
+    if (s.instagram) socialItems.push({ platform: "instagram", url: s.instagram, icon: "instagram", label: "Instagram" });
+    if (s.linkedin) socialItems.push({ platform: "linkedin", url: s.linkedin, icon: "linkedin", label: "LinkedIn" });
+    if (s.mastodon) socialItems.push({ platform: "mastodon", url: s.mastodon, icon: "mastodon", label: "Mastodon" });
+}
+
+const hasHackingSection = Boolean(
+    profile?.bio ||
+    (profile?.customLinks && profile.customLinks.length > 0)
+);
+
+const hasContactSection = Boolean(
+    visibleEmails.length > 0 ||
+    member?.discord_id ||
+    visiblePhone
+);
+---
+
+<Layout
+    title={
+        member
+            ? `${member.name} (@${member.preferred_username}) — Directory`
+            : "Member Not Found"
+    }
+>
+    <div class="max-w-3xl mx-auto py-6">
+        <!-- Back Link -->
+        <div class="mb-6">
+            <BackLink href="/">Back to directory</BackLink>
+        </div>
+
+        {!member ? (
+            <div class="border border-foreground p-8 bg-card text-center my-12">
+                <h1 class="ph-headline text-3xl mb-2">MEMBER NOT FOUND</h1>
+                <p class="font-sans text-foreground/80 mb-6">
+                    Could not find a Purdue Hackers member with username{" "}
+                    <code class="font-mono bg-muted px-1 border border-foreground">
+                        @{username}
+                    </code>
+                    .
+                </p>
+                <Button href="/" variant="outline">
+                    Browse all members
+                </Button>
+            </div>
+        ) : (
+            <article class="flex flex-col gap-8">
+                <!-- Hero Profile Card -->
+                <div class="border border-foreground bg-card p-6 sm:p-8">
+                    <div class="flex flex-col sm:flex-row items-start gap-6">
+                        {safeAvatarUrl ? (
+                            <img
+                                src={safeAvatarUrl}
+                                alt=""
+                                width="96"
+                                height="96"
+                                referrerpolicy="no-referrer"
+                                class="size-24 shrink-0 border border-foreground object-cover bg-muted"
+                            />
+                        ) : (
+                            <div
+                                aria-hidden="true"
+                                class="size-24 shrink-0 border border-foreground bg-ph-yellow text-ph-black flex items-center justify-center font-mono text-3xl font-bold"
+                            >
+                                {member.preferred_username
+                                    .slice(0, 2)
+                                    .toUpperCase()}
+                            </div>
+                        )}
+
+                        <div class="flex-1 min-w-0">
+                            <div class="flex flex-wrap items-center gap-2 mb-1">
+                                <h1 class="ph-headline text-3xl sm:text-4xl leading-tight">
+                                    {member.name || member.preferred_username}
+                                </h1>
+                                {isSelf && (
+                                    <Badge
+                                        color="outline"
+                                        class="border-ph-purple text-ph-purple dark:border-ph-yellow dark:text-ph-yellow"
+                                    >
+                                        You
+                                    </Badge>
+                                )}
+                            </div>
+
+                            <p class="font-mono text-base font-semibold text-foreground/85 mb-2">
+                                @{member.preferred_username}
+                            </p>
+
+                            <!-- Headline / Tagline -->
+                            {profile?.headline && (
+                                <p class="font-sans text-base text-foreground mb-3 font-medium leading-snug">
+                                    {profile.headline}
+                                </p>
+                            )}
+
+                            <!-- Location & Timezone info -->
+                            {(profile?.location || serverLocalTime) && (
+                                <div class="flex flex-wrap items-center gap-3 text-xs font-mono text-foreground/80 mb-3">
+                                    {profile?.location && (
+                                        <span class="inline-flex items-center gap-1">
+                                            <Icon name="location-pin" class="size-3.5 text-foreground/70" />
+                                            <span>{profile.location}</span>
+                                        </span>
+                                    )}
+                                    {serverLocalTime && (
+                                        <span class="inline-flex items-center gap-1 border-l border-border pl-3">
+                                            <Icon name="clock" class="size-3.5 text-foreground/70" />
+                                            <span data-tz={profile?.timezone}>{serverLocalTime}</span>
+                                        </span>
+                                    )}
+                                </div>
+                            )}
+
+                            <!-- Badges -->
+                            <div class="flex flex-wrap items-center gap-2">
+                                {member.graduation_year && (
+                                    <Badge color="default">
+                                        Class of {member.graduation_year}
+                                    </Badge>
+                                )}
+
+                                {visibleRoles && visibleRoles.length > 0 ? (
+                                    visibleRoles.map((r) => (
+                                        <Badge color={roleColor(r)}>{r}</Badge>
+                                    ))
+                                ) : (
+                                    <Badge color="outline">member</Badge>
+                                )}
+                            </div>
+
+                            <!-- Social Links Row -->
+                            {socialItems.length > 0 && (
+                                <div class="flex flex-wrap items-center gap-2 mt-4 pt-3 border-t border-border">
+                                    {socialItems.map((item) => (
+                                        <a
+                                            href={item.url}
+                                            target="_blank"
+                                            rel="noopener noreferrer"
+                                            class="border border-foreground bg-background hover:bg-ph-yellow hover:text-ph-black px-2.5 py-1 font-mono text-xs font-semibold inline-flex items-center gap-1.5 transition-colors no-underline text-foreground"
+                                            title={item.label}
+                                        >
+                                            <Icon name={item.icon} class="size-3.5" />
+                                            <span>{item.label}</span>
+                                            <span class="text-[10px] text-foreground/60 leading-none">↗</span>
+                                        </a>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+
+                        {isSelf && (
+                            <div class="self-stretch sm:self-start flex sm:flex-col gap-2 shrink-0">
+                                <a
+                                    href="/settings/profile"
+                                    class="border border-foreground bg-ph-yellow text-ph-black px-3 py-1.5 font-mono text-xs font-bold uppercase hover:bg-foreground hover:text-background transition-colors text-center no-underline inline-flex items-center justify-center gap-1"
+                                >
+                                    <Icon name="pencil" class="size-3" />
+                                    <span>Edit Profile</span>
+                                </a>
+                                <a
+                                    href={`${config.idBase}`}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    class="border border-foreground bg-background text-foreground px-3 py-1.5 font-mono text-xs font-bold uppercase hover:bg-foreground hover:text-background transition-colors text-center no-underline"
+                                >
+                                    Edit on ID ↗
+                                </a>
+                            </div>
+                        )}
+                    </div>
+                </div>
+
+                <!-- Self Empty Profile Prompt -->
+                {isSelf && !profile?.headline && !profile?.bio && !profile?.location && (
+                    <div class="border border-dashed border-foreground/60 bg-ph-yellow/10 p-5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                        <div>
+                            <h2 class="ph-subheadline text-base mb-1">
+                                Complete your Directory profile!
+                            </h2>
+                            <p class="font-sans text-sm text-foreground/80">
+                                Add your website, socials, location, and bio so other hackers can connect with you.
+                            </p>
+                        </div>
+                        <a
+                            href="/settings/profile"
+                            class="border border-foreground bg-ph-yellow text-ph-black px-4 py-2 font-mono text-xs font-bold uppercase hover:bg-foreground hover:text-background transition-colors shrink-0 no-underline"
+                        >
+                            Set up profile →
+                        </a>
+                    </div>
+                )}
+
+                <!-- About & Hacking Section -->
+                {hasHackingSection && (
+                    <div class="flex flex-col gap-4">
+                        <Separator label="About & Hacking" />
+
+                        {profile?.bio && (
+                            <div class="border border-foreground bg-card p-5">
+                                <span class="ph-subheadline text-xs block mb-3 text-foreground/80">
+                                    About Me
+                                </span>
+                                <div class="font-sans text-sm sm:text-base text-foreground leading-relaxed whitespace-pre-line">
+                                    {profile.bio}
+                                </div>
+                            </div>
+                        )}
+
+                        {profile?.customLinks && profile.customLinks.length > 0 && (
+                            <div class="border border-foreground bg-card p-5">
+                                <span class="ph-subheadline text-xs block mb-3 text-foreground/80">
+                                    External Links
+                                </span>
+                                <div class="flex flex-wrap gap-2.5">
+                                    {profile.customLinks.map((link) => (
+                                        <a
+                                            href={link.url}
+                                            target="_blank"
+                                            rel="noopener noreferrer"
+                                            class="border border-foreground bg-background hover:bg-foreground hover:text-background px-3 py-1.5 font-mono text-xs font-bold uppercase inline-flex items-center gap-1.5 transition-colors no-underline text-foreground"
+                                        >
+                                            <Icon name="link" class="size-3" />
+                                            <span>{link.label}</span>
+                                            <span>↗</span>
+                                        </a>
+                                    ))}
+                                </div>
+                            </div>
+                        )}
+                    </div>
+                )}
+
+                <!-- Contact Information -->
+                {hasContactSection && (
+                    <div class="flex flex-col gap-4">
+                        <Separator label="Contact & Accounts" />
+
+                        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                            <!-- Email -->
+                            {visibleEmails.length > 0 && (
+                                <div class="border border-foreground p-5 bg-card flex flex-col gap-2.5">
+                                    <span class="ph-subheadline text-xs flex items-center gap-1.5 text-foreground/85">
+                                        <Icon name="envelope" class="size-4" />
+                                        Email {visibleEmails.length > 1 ? "Addresses" : "Address"}
+                                    </span>
+                                    <div class="flex flex-col gap-2 mt-0.5">
+                                        {visibleEmails.map((em) => (
+                                            <div class="flex items-center gap-2 flex-wrap">
+                                                <a
+                                                    href={`mailto:${em.email}`}
+                                                    class="font-mono text-sm font-semibold underline decoration-foreground/30 hover:decoration-foreground hover:text-ph-purple dark:hover:text-ph-yellow transition-colors break-all"
+                                                >
+                                                    {em.email}
+                                                </a>
+                                                <button
+                                                    type="button"
+                                                    data-copy={em.email}
+                                                    class="inline-flex items-center justify-center text-foreground/60 hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-foreground transition-colors p-1 cursor-pointer"
+                                                    title="Copy email"
+                                                    aria-label={`Copy ${em.email}`}
+                                                >
+                                                    <Icon name="copy" class="size-3.5 copy-icon" />
+                                                    <Icon name="check" class="size-3.5 check-icon text-ph-lime hidden" />
+                                                </button>
+                                                {em.primary && (
+                                                    <Badge color="default" class="text-[10px] py-0 px-1">Primary</Badge>
+                                                )}
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
+
+                            <!-- Phone -->
+                            {visiblePhone && (
+                                <div class="border border-foreground p-5 bg-card flex flex-col gap-2.5">
+                                    <span class="ph-subheadline text-xs flex items-center gap-1.5 text-foreground/85">
+                                        <Icon name="phone" class="size-4" />
+                                        Phone Number
+                                    </span>
+                                    <div class="flex items-center gap-2 flex-wrap mt-0.5">
+                                        <a
+                                            href={`tel:${visiblePhone.replace(/[^\d+]/g, '')}`}
+                                            class="font-mono text-sm font-semibold underline decoration-foreground/30 hover:decoration-foreground hover:text-ph-purple dark:hover:text-ph-yellow transition-colors"
+                                        >
+                                            {formattedPhone}
+                                        </a>
+                                        <button
+                                            type="button"
+                                            data-copy={formattedPhone}
+                                            class="inline-flex items-center justify-center text-foreground/60 hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-foreground transition-colors p-1 cursor-pointer"
+                                            title="Copy phone number"
+                                            aria-label={`Copy ${formattedPhone}`}
+                                        >
+                                            <Icon name="copy" class="size-3.5 copy-icon" />
+                                            <Icon name="check" class="size-3.5 check-icon text-ph-lime hidden" />
+                                        </button>
+                                    </div>
+                                </div>
+                            )}
+
+                            <!-- Discord -->
+                            {member.discord_id && (
+                                <div class="border border-foreground p-5 bg-card flex flex-col gap-2.5">
+                                    <span class="ph-subheadline text-xs flex items-center gap-1.5 text-foreground/85">
+                                        <Icon
+                                            name="discord"
+                                            class="size-4 text-ph-purple dark:text-ph-periwinkle"
+                                        />
+                                        Discord
+                                    </span>
+                                    <div class="flex items-center justify-between gap-3 mt-0.5">
+                                        <a
+                                            href={`https://discord.com/users/${encodeURIComponent(member.discord_id)}`}
+                                            target="_blank"
+                                            rel="noopener noreferrer"
+                                            class="group inline-flex flex-col gap-0.5 no-underline"
+                                        >
+                                            {member.discord?.guildNickname ? (
+                                                <div>
+                                                    <p class="font-sans text-sm font-bold text-foreground group-hover:text-ph-purple dark:group-hover:text-ph-yellow leading-snug break-words transition-colors inline-flex items-center gap-1 underline decoration-foreground/30 group-hover:decoration-foreground">
+                                                        <span>{member.discord.guildNickname}</span>
+                                                        <span class="text-xs font-mono text-foreground/60 no-underline">↗</span>
+                                                    </p>
+                                                    <p class="font-mono text-xs text-foreground/75 mt-0.5">
+                                                        @{member.discord.username}
+                                                    </p>
+                                                </div>
+                                            ) : member.discord?.username ? (
+                                                <div>
+                                                    {member.discord.globalName && member.discord.globalName.toLowerCase() !== member.discord.username.toLowerCase() ? (
+                                                        <>
+                                                            <p class="font-sans text-sm font-bold text-foreground group-hover:text-ph-purple dark:group-hover:text-ph-yellow leading-snug break-words transition-colors inline-flex items-center gap-1 underline decoration-foreground/30 group-hover:decoration-foreground">
+                                                                <span>{member.discord.globalName}</span>
+                                                                <span class="text-xs font-mono text-foreground/60 no-underline">↗</span>
+                                                            </p>
+                                                            <p class="font-mono text-xs text-foreground/75 mt-0.5">
+                                                                @{member.discord.username}
+                                                            </p>
+                                                        </>
+                                                    ) : (
+                                                        <p class="font-mono text-sm font-semibold text-foreground group-hover:text-ph-purple dark:group-hover:text-ph-yellow break-all transition-colors inline-flex items-center gap-1 underline decoration-foreground/30 group-hover:decoration-foreground">
+                                                            <span>@{member.discord.username}</span>
+                                                            <span class="text-xs font-mono text-foreground/60 no-underline">↗</span>
+                                                        </p>
+                                                    )}
+                                                </div>
+                                            ) : (
+                                                <p class="font-mono text-sm font-semibold text-foreground group-hover:text-ph-purple dark:group-hover:text-ph-yellow transition-colors inline-flex items-center gap-1 underline decoration-foreground/30 group-hover:decoration-foreground">
+                                                    <span>Open Discord Profile</span>
+                                                    <span class="text-xs font-mono text-foreground/60 no-underline">↗</span>
+                                                </p>
+                                            )}
+                                        </a>
+
+                                        {member.discord?.username && (
+                                            <button
+                                                type="button"
+                                                data-copy={member.discord.username}
+                                                class="inline-flex items-center justify-center text-foreground/60 hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-foreground transition-colors p-1 cursor-pointer shrink-0 self-start mt-0.5"
+                                                title="Copy Discord username"
+                                                aria-label={`Copy @${member.discord.username}`}
+                                            >
+                                                <Icon name="copy" class="size-3.5 copy-icon" />
+                                                <Icon name="check" class="size-3.5 check-icon text-ph-lime hidden" />
+                                            </button>
+                                        )}
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                )}
+            </article>
+        )}
+    </div>
+</Layout>
+
+<script>
+    // Copy to clipboard helper
+    for (const btn of document.querySelectorAll<HTMLButtonElement>(
+        "[data-copy]",
+    )) {
+        const copyIcon = btn.querySelector<HTMLElement>(".copy-icon");
+        const checkIcon = btn.querySelector<HTMLElement>(".check-icon");
+        const originalTitle = btn.getAttribute("title") || "Copy";
+        const originalAria = btn.getAttribute("aria-label") || "Copy";
+        let timer: ReturnType<typeof setTimeout> | undefined;
+
+        btn.addEventListener("click", async (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            const text = btn.getAttribute("data-copy");
+            if (!text) return;
+            try {
+                await navigator.clipboard.writeText(text);
+                if (copyIcon && checkIcon) {
+                    copyIcon.classList.add("hidden");
+                    checkIcon.classList.remove("hidden");
+                }
+                btn.setAttribute("title", "Copied!");
+                btn.setAttribute("aria-label", "Copied!");
+                clearTimeout(timer);
+                timer = setTimeout(() => {
+                    if (copyIcon && checkIcon) {
+                        copyIcon.classList.remove("hidden");
+                        checkIcon.classList.add("hidden");
+                    }
+                    btn.setAttribute("title", originalTitle);
+                    btn.setAttribute("aria-label", originalAria);
+                }, 1500);
+            } catch (err) {
+                console.error("Clipboard copy failed:", err);
+            }
+        });
+    }
+
+    // Hydrate and tick live local time
+    const tzEls = document.querySelectorAll<HTMLElement>("[data-tz]");
+    function updateTimes() {
+        for (const el of tzEls) {
+            const tz = el.getAttribute("data-tz");
+            if (!tz) continue;
+            try {
+                const formatted = new Intl.DateTimeFormat("en-US", {
+                    timeZone: tz,
+                    hour: "numeric",
+                    minute: "2-digit",
+                    timeZoneName: "short",
+                }).format(new Date());
+                el.textContent = formatted;
+            } catch {}
+        }
+    }
+    if (tzEls.length > 0) {
+        setInterval(updateTimes, 30_000);
+    }
+</script>
