@@ -42,24 +42,14 @@
   inset: 0;
   display: grid;
   grid-template-columns: repeat(var(--cols), 1fr);
-  align-content: center;
+  grid-template-rows: repeat(var(--rows, 5), 1fr);
   pointer-events: none;
 }
 
-.ph-dither-btn__pixel {
-  position: relative;
-  aspect-ratio: 1;
-  background: var(--pixel);
-}
-
 /* Duration 0: each pixel snaps, only the delay staggers. */
-.ph-dither-btn__pixel::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  background: var(--pixel-hover);
-  opacity: 0;
-  transition: opacity 0s calc(var(--i) * 18ms);
+.ph-dither-btn__pixel {
+  background: var(--pixel);
+  transition: background-color 0s calc(var(--i) * 900ms / (var(--cols, 10) * var(--rows, 5)));
 }
 
 .ph-dither-btn__label {
@@ -69,8 +59,8 @@
   transition: color 200ms ease;
 }
 
-.ph-dither-btn:focus-visible .ph-dither-btn__pixel::after {
-  opacity: 1;
+.ph-dither-btn:focus-visible .ph-dither-btn__pixel {
+  background: var(--pixel-hover);
 }
 
 .ph-dither-btn:focus-visible .ph-dither-btn__label {
@@ -78,8 +68,8 @@
 }
 
 @media (hover: hover) {
-  .ph-dither-btn:hover .ph-dither-btn__pixel::after {
-    opacity: 1;
+  .ph-dither-btn:hover .ph-dither-btn__pixel {
+    background: var(--pixel-hover);
   }
 
   .ph-dither-btn:hover .ph-dither-btn__label {
@@ -88,7 +78,7 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .ph-dither-btn__pixel::after,
+  .ph-dither-btn__pixel,
   .ph-dither-btn__label {
     transition: none;
   }

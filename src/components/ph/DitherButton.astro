@@ -20,7 +20,7 @@ const Tag = href ? "a" : "button";
   type={href ? undefined : type}
   data-tone={tone}
   class:list={["ph-dither-btn", className]}
-  style={[`--cols: ${cols}`, style].filter(Boolean).join("; ")}
+  style={[`--cols: ${cols}`, `--rows: ${rows}`, style].filter(Boolean).join("; ")}
   {...rest}
 >
   <span class="ph-dither-btn__pixels" aria-hidden="true">
