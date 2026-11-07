@@ -3,7 +3,11 @@ import Layout from "../layouts/Layout.astro";
 import MemberCard from "../components/MemberCard.astro";
 import Icon from "../components/ph/Icon.astro";
 import { getDirectorySnapshot } from "../lib/server/id-directory";
-import { filterAndSearchMembers, type SortOption } from "../lib/server/search";
+import {
+    filterAndSearchMembers,
+    groupMembersByCategory,
+    type SortOption,
+} from "../lib/server/search";
 
 const query = Astro.url.searchParams.get("q") || "";
 const role = Astro.url.searchParams.get("role") || "all";
@@ -47,6 +51,9 @@ const roleOptions = [
     { id: "alumni", label: "Alumni" },
     { id: "member", label: "Members" },
 ];
+
+const categorySections =
+    role === "all" ? groupMembersByCategory(filteredMembers) : [];
 ---
 
 <Layout title="Member Directory — Purdue Hackers">
@@ -305,6 +312,36 @@ const roleOptions = [
                     Clear filters
                 </a>
             </div>
+        ) : role === "all" ? (
+            <div id="members-grid" class="flex flex-col gap-8">
+                {categorySections.map((section) => (
+                    <section
+                        data-category-section={section.id}
+                        class:list={[
+                            "flex flex-col gap-4",
+                            section.members.length === 0 && "hidden",
+                        ]}
+                    >
+                        <div class="border-b border-foreground pb-2 text-left">
+                            <h2 class="ph-headline text-2xl sm:text-3xl tracking-wide uppercase text-left">
+                                {section.label}
+                            </h2>
+                        </div>
+                        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                            {section.members.map((member) => (
+                                <MemberCard
+                                    member={member}
+                                    isSelf={
+                                        viewer?.preferred_username?.toLowerCase() ===
+                                            member.preferred_username.toLowerCase() ||
+                                        viewer?.sub === member.sub
+                                    }
+                                />
+                            ))}
+                        </div>
+                    </section>
+                ))}
+            </div>
         ) : (
             <div
                 id="members-grid"
@@ -334,6 +371,9 @@ const roleOptions = [
         "directory-filter-form",
     ) as HTMLFormElement | null;
     const cards = document.querySelectorAll<HTMLElement>(".member-card");
+    const categorySections = document.querySelectorAll<HTMLElement>(
+        "[data-category-section]",
+    );
     const countNum = document.getElementById("member-count-num");
     const countUnit = document.getElementById("member-count-unit");
     const clientEmptyState = document.getElementById("client-empty-state");
@@ -419,6 +459,15 @@ const roleOptions = [
                     if (matches) visibleCount++;
                 },
             );
+
+            categorySections.forEach((section) => {
+                const sectionCards =
+                    section.querySelectorAll<HTMLElement>(".member-card");
+                const hasVisibleCard = Array.from(sectionCards).some(
+                    (c) => c.style.display !== "none",
+                );
+                section.classList.toggle("hidden", !hasVisibleCard);
+            });
 
             if (countNum) countNum.textContent = String(visibleCount);
             if (countUnit)

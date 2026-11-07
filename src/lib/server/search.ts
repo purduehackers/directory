@@ -7,6 +7,47 @@ import {
 } from './id-directory';
 
 export type SortOption = 'relevance' | 'name_asc' | 'name_desc' | 'grad_desc' | 'grad_asc';
+export type MemberCategory = 'organizer' | 'alumni' | 'member';
+
+const CATEGORY_ORDER: Record<MemberCategory, number> = {
+  organizer: 0,
+  member: 1,
+  alumni: 2,
+};
+
+export function getMemberCategory(member: DirectoryMember): MemberCategory {
+  const roles = member.roles?.map((r) => r.toLowerCase()) ?? [];
+  if (roles.includes('organizer')) return 'organizer';
+  if (roles.includes('alumni')) return 'alumni';
+  return 'member';
+}
+
+export function groupMembersByCategory(members: DirectoryMember[]): {
+  id: MemberCategory;
+  label: string;
+  members: DirectoryMember[];
+}[] {
+  const organizers: DirectoryMember[] = [];
+  const alumni: DirectoryMember[] = [];
+  const generalMembers: DirectoryMember[] = [];
+
+  for (const m of members) {
+    const category = getMemberCategory(m);
+    if (category === 'organizer') {
+      organizers.push(m);
+    } else if (category === 'alumni') {
+      alumni.push(m);
+    } else {
+      generalMembers.push(m);
+    }
+  }
+
+  return [
+    { id: 'organizer', label: 'Organizers', members: organizers },
+    { id: 'member', label: 'Members', members: generalMembers },
+    { id: 'alumni', label: 'Alumni', members: alumni },
+  ];
+}
 
 export type SearchOptions = {
   query?: string;
@@ -74,7 +115,14 @@ export function filterAndSearchMembers(
       ? 'relevance'
       : (explicitSort as SortOption) || 'name_asc';
 
+  const isAllRoles = !options.role || options.role.toLowerCase() === 'all';
+
   return [...list].sort((a, b) => {
+    if (isAllRoles) {
+      const catDiff = CATEGORY_ORDER[getMemberCategory(a)] - CATEGORY_ORDER[getMemberCategory(b)];
+      if (catDiff !== 0) return catDiff;
+    }
+
     switch (effectiveSort) {
       case 'relevance': {
         const diff = (scoreMap.get(b.sub) || 0) - (scoreMap.get(a.sub) || 0);

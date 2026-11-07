@@ -11,7 +11,10 @@ function getEnv(key: string, fallback = ''): string {
 }
 
 const isProd =
-  (typeof import.meta !== 'undefined' && import.meta.env?.PROD === true) ||
+  (typeof import.meta !== 'undefined' &&
+    ((import.meta.env?.PROD as unknown) === true ||
+      String(import.meta.env?.PROD) === 'true' ||
+      import.meta.env?.MODE === 'production')) ||
   process.env.NODE_ENV === 'production';
 
 // Ephemeral random secret for local dev/testing only so no static secret exists in source code

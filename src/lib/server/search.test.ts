@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'bun:test';
-import { filterAndSearchMembers, getAvailableGradYears } from './search';
+import {
+  filterAndSearchMembers,
+  getAvailableGradYears,
+  groupMembersByCategory,
+} from './search';
 import { buildDirectorySnapshot, type DirectoryMember } from './id-directory';
 
 const mockMembers: DirectoryMember[] = [
@@ -98,9 +102,25 @@ const mockMembers: DirectoryMember[] = [
 ];
 
 describe('Search and Filter Engine', () => {
-  it('returns all members when no filters provided', () => {
+  it('returns all members when no filters provided and sorts by organizers, members, then alumni', () => {
     const res = filterAndSearchMembers(mockMembers);
     expect(res.length).toBe(5);
+    expect(res.map((m) => m.preferred_username)).toEqual([
+      'alice',
+      'testy',
+      'aaron',
+      'charlie',
+      'bob',
+    ]);
+  });
+
+  it('groups members into Organizers, Members, and Alumni sections in order', () => {
+    const sorted = filterAndSearchMembers(mockMembers);
+    const groups = groupMembersByCategory(sorted);
+    expect(groups.map((g) => g.label)).toEqual(['Organizers', 'Members', 'Alumni']);
+    expect(groups[0].members.map((m) => m.preferred_username)).toEqual(['alice', 'testy']);
+    expect(groups[1].members.map((m) => m.preferred_username)).toEqual(['aaron', 'charlie']);
+    expect(groups[2].members.map((m) => m.preferred_username)).toEqual(['bob']);
   });
 
   it('filters by role correctly', () => {
