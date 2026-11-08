@@ -123,6 +123,7 @@ export type IndexedMember = DirectoryMember & {
   discordText: string;
   locationText: string;
   headlineText: string;
+  majorText: string;
   bioText: string;
   linksText: string;
   emailsText: string;
@@ -261,6 +262,7 @@ export function buildIndexedDoc(
     discordText,
     locationText: profile?.location ?? '',
     headlineText: profile?.headline ?? '',
+    majorText: profile?.major ?? '',
     bioText: profile?.bio ?? '',
     linksText,
     emailsText: visibleEmailsText,
@@ -314,6 +316,7 @@ export function buildDirectorySnapshot(
       'preferred_username',
       'locationText',
       'headlineText',
+      'majorText',
       'bioText',
       'linksText',
       'emailsText',
@@ -334,6 +337,7 @@ export function buildDirectorySnapshot(
         locationText: 2.5,
         discordText: 2.5,
         headlineText: 2.0,
+        majorText: 2.0,
         emailsText: 2.0,
         phoneText: 2.0,
         rolesText: 1.5,

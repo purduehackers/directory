@@ -1,8 +1,10 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { createClient as createWebClient, type Client } from '@libsql/client/web';
 import { drizzle } from 'drizzle-orm/libsql/web';
 import type { LibSQLDatabase } from 'drizzle-orm/libsql';
+import { readMigrationFiles } from 'drizzle-orm/migrator';
 import { config } from '../config';
 import * as schema from './schema';
 
@@ -50,6 +52,41 @@ export async function getDb(): Promise<LibSQLDatabase<typeof schema>> {
   return dbInstance;
 }
 
+// Ledger layout is identical to what drizzle-kit itself creates, so local
+// runtime migrations and build-time `drizzle-kit migrate` agree on what has
+// been applied.
+const MIGRATIONS_LEDGER_TABLE = '__drizzle_migrations';
+
+async function applyLocalMigrations(client: Client, migrationsFolder: string): Promise<void> {
+  await client.execute(`
+    CREATE TABLE IF NOT EXISTS ${MIGRATIONS_LEDGER_TABLE} (
+      id SERIAL PRIMARY KEY,
+      hash text NOT NULL,
+      created_at numeric
+    );
+  `);
+  const applied = await client.execute(
+    `SELECT created_at FROM ${MIGRATIONS_LEDGER_TABLE} ORDER BY created_at DESC LIMIT 1`
+  );
+  const lastAppliedAt = applied.rows[0]?.created_at;
+
+  const migrations = readMigrationFiles({ migrationsFolder });
+  for (const migration of migrations) {
+    if (lastAppliedAt !== undefined && Number(lastAppliedAt) >= migration.folderMillis) continue;
+    await client.batch(
+      [
+        ...migration.sql.map((stmt) => ({ sql: stmt })),
+        {
+          sql: `INSERT INTO ${MIGRATIONS_LEDGER_TABLE} (hash, created_at) VALUES (?, ?);`,
+          args: [migration.hash, migration.folderMillis],
+        },
+      ],
+      'write'
+    );
+    console.log(`[DB] Applied local migration (${migration.folderMillis})`);
+  }
+}
+
 export async function ensureDbInitialized(): Promise<LibSQLDatabase<typeof schema>> {
   const db = await getDb();
   if (!initPromise) {
@@ -60,43 +97,15 @@ export async function ensureDbInitialized(): Promise<LibSQLDatabase<typeof schem
             PRAGMA journal_mode = WAL;
             PRAGMA busy_timeout = 5000;
             DROP TABLE IF EXISTS discord_profiles;
-            CREATE TABLE IF NOT EXISTS member_profiles (
-              sub TEXT PRIMARY KEY NOT NULL,
-              headline TEXT,
-              bio TEXT,
-              location TEXT,
-              timezone TEXT,
-              website_url TEXT,
-              socials_json TEXT NOT NULL DEFAULT '{}',
-              custom_links_json TEXT NOT NULL DEFAULT '[]',
-              contact_visibility_json TEXT NOT NULL DEFAULT '{}',
-              updated_at INTEGER NOT NULL
-            );
           `);
-
-          try {
-            await clientInstance!.execute(
-              "ALTER TABLE member_profiles ADD COLUMN contact_visibility_json TEXT NOT NULL DEFAULT '{}';"
-            );
-          } catch {
-            // Column already exists on legacy local dev DB
-          }
-        } else {
-          // Remote Turso: single idempotent DDL check, no failing ALTER TABLE round-trip
-          await clientInstance!.execute(`
-            CREATE TABLE IF NOT EXISTS member_profiles (
-              sub TEXT PRIMARY KEY NOT NULL,
-              headline TEXT,
-              bio TEXT,
-              location TEXT,
-              timezone TEXT,
-              website_url TEXT,
-              socials_json TEXT NOT NULL DEFAULT '{}',
-              custom_links_json TEXT NOT NULL DEFAULT '[]',
-              contact_visibility_json TEXT NOT NULL DEFAULT '{}',
-              updated_at INTEGER NOT NULL
-            );
-          `);
+          // Local dev/test databases are migrated at runtime from the versioned
+          // drizzle migrations in ./drizzle. Production (remote Turso) is
+          // migrated at build time via `drizzle-kit migrate` (see build script).
+          const migrationsFolder = path.resolve(
+            path.dirname(fileURLToPath(import.meta.url)),
+            '../../../../drizzle'
+          );
+          await applyLocalMigrations(clientInstance!, migrationsFolder);
         }
       } catch (err) {
         initPromise = null;

@@ -3,6 +3,7 @@ import { config } from './config';
 
 export type ProfileInputPayload = {
   headline?: unknown;
+  major?: unknown;
   bio?: unknown;
   location?: unknown;
   timezone?: unknown;
@@ -14,6 +15,7 @@ export type ProfileInputPayload = {
 
 export type ValidatedProfileData = {
   headline: string | null;
+  major: string | null;
   bio: string | null;
   location: string | null;
   timezone: string | null;
@@ -34,6 +36,7 @@ const EXCESSIVE_COMBINING_MARKS = /(\p{M}{3})\p{M}+/gu;
 
 export const PROFILE_LIMITS = {
   headline: 100,
+  major: 80,
   bio: 600,
   location: 80,
   websiteUrl: 512,
@@ -244,6 +247,12 @@ export function validateProfileInput(input: ProfileInputPayload): ProfileValidat
     errors.headline = `Headline must be ${PROFILE_LIMITS.headline} characters or fewer.`;
   }
 
+  // 1b. Major
+  const major = cleanSingleLine(input.major);
+  if (major.length > PROFILE_LIMITS.major) {
+    errors.major = `Major must be ${PROFILE_LIMITS.major} characters or fewer.`;
+  }
+
   // 2. Bio
   const bio = cleanMultiLine(input.bio);
   if (bio.length > PROFILE_LIMITS.bio) {
@@ -355,6 +364,7 @@ export function validateProfileInput(input: ProfileInputPayload): ProfileValidat
     ok: true,
     data: {
       headline: headline || null,
+      major: major || null,
       bio: bio || null,
       location: location || null,
       timezone: timezone || null,

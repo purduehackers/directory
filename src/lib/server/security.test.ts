@@ -30,6 +30,7 @@ describe('Security Audit Fix Verifications', () => {
       profile: {
         sub: 'sub-sec-01',
         headline: 'Security Researcher',
+        major: 'Computer Science',
         bio: 'Auditing code',
         location: 'West Lafayette, IN',
         timezone: 'America/New_York',
@@ -94,6 +95,7 @@ describe('Security Audit Fix Verifications', () => {
       profile: {
         sub: 'sub-sec-visible',
         headline: 'Public Info',
+        major: null,
         bio: 'Sharing contact info',
         location: 'West Lafayette, IN',
         timezone: 'America/New_York',

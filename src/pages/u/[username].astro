@@ -209,6 +209,11 @@ const hasContactSection = Boolean(
 
                             <!-- Badges -->
                             <div class="flex flex-wrap items-center gap-2">
+                                {profile?.major && (
+                                    <Badge color="outline">
+                                        {profile.major}
+                                    </Badge>
+                                )}
                                 {member.graduation_year && (
                                     <Badge color="default">
                                         Class of {member.graduation_year}

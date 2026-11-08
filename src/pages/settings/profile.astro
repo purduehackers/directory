@@ -105,6 +105,7 @@ if (Astro.request.method === "POST") {
             if (!formError) {
                 const formData = new URLSearchParams(rawBody);
                 const headline = formData.get("headline")?.toString() || "";
+                const major = formData.get("major")?.toString() || "";
                 const bio = formData.get("bio")?.toString() || "";
                 const location = formData.get("location")?.toString() || "";
                 const timezone = formData.get("timezone")?.toString() || "";
@@ -162,6 +163,7 @@ if (Astro.request.method === "POST") {
 
                 const validation = validateProfileInput({
                     headline,
+                    major,
                     bio,
                     location,
                     timezone,
@@ -178,6 +180,7 @@ if (Astro.request.method === "POST") {
                     profile = {
                         sub: user.sub,
                         headline: headline || null,
+                        major: major || null,
                         bio: bio || null,
                         location: location || null,
                         timezone: timezone || null,
@@ -331,6 +334,27 @@ for (const p of SOCIAL_PLATFORMS) {
                             id="headline-count"
                         >
                             {(profile?.headline || "").length} / 100
+                        </div>
+                    </Field>
+
+                    <Field
+                        label="Major"
+                        hint="e.g. Computer Science, Electrical Engineering"
+                        error={fieldErrors.major}
+                    >
+                        <Input
+                            id="major"
+                            name="major"
+                            type="text"
+                            maxlength="80"
+                            placeholder="e.g. Computer Science"
+                            value={profile?.major || ""}
+                        />
+                        <div
+                            class="text-right text-[11px] font-mono text-foreground/60"
+                            id="major-count"
+                        >
+                            {(profile?.major || "").length} / 80
                         </div>
                     </Field>
 
@@ -842,6 +866,11 @@ for (const p of SOCIAL_PLATFORMS) {
 
                             <!-- Badges -->
                             <div class="flex flex-wrap items-center gap-2">
+                                <Badge
+                                    color="outline"
+                                    id="pv-major-badge"
+                                    class="hidden"
+                                ></Badge>
                                 {user.graduation_year && (
                                     <Badge color="default">
                                         Class of {user.graduation_year}
@@ -1056,6 +1085,11 @@ for (const p of SOCIAL_PLATFORMS) {
 
                         <!-- Roles -->
                         <div class="flex flex-wrap items-center gap-1.5 mt-3 pt-3 border-t border-border">
+                            <Badge
+                                color="outline"
+                                id="pvc-major-badge"
+                                class="text-[10px] hidden"
+                            ></Badge>
                             {(user.roles || [])
                                 .filter(
                                     (r: string) => r.toLowerCase() !== "admin",
@@ -1172,6 +1206,7 @@ for (const p of SOCIAL_PLATFORMS) {
     }
 
     setupCharCounter("headline", "headline-count", 100);
+    setupCharCounter("major", "major-count", 80);
     setupCharCounter("bio", "bio-count", 600);
 
     // Detect Timezone
@@ -1491,6 +1526,7 @@ for (const p of SOCIAL_PLATFORMS) {
 
             const payload = {
                 headline: formData.get("headline")?.toString() || "",
+                major: formData.get("major")?.toString() || "",
                 bio: formData.get("bio")?.toString() || "",
                 location: formData.get("location")?.toString() || "",
                 timezone: formData.get("timezone")?.toString() || "",
@@ -1599,6 +1635,10 @@ for (const p of SOCIAL_PLATFORMS) {
             (
                 document.getElementById("headline") as HTMLInputElement | null
             )?.value.trim() || "";
+        const major =
+            (
+                document.getElementById("major") as HTMLInputElement | null
+            )?.value.trim() || "";
         const bio =
             (
                 document.getElementById("bio") as HTMLTextAreaElement | null
@@ -1626,6 +1666,18 @@ for (const p of SOCIAL_PLATFORMS) {
         if (pvcHeadline) {
             pvcHeadline.textContent = headline;
             pvcHeadline.classList.toggle("hidden", !headline);
+        }
+
+        // 1b. Major badge (profile preview + card preview)
+        const pvMajorBadge = document.getElementById("pv-major-badge");
+        const pvcMajorBadge = document.getElementById("pvc-major-badge");
+        if (pvMajorBadge) {
+            pvMajorBadge.textContent = major;
+            pvMajorBadge.classList.toggle("hidden", !major);
+        }
+        if (pvcMajorBadge) {
+            pvcMajorBadge.textContent = major;
+            pvcMajorBadge.classList.toggle("hidden", !major);
         }
 
         // 2. Location & Timezone

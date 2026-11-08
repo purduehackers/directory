@@ -55,6 +55,7 @@ const discordSearchData = [discordHandle, discordGuildNick, cleanDiscordId].filt
   data-member-sub={member.sub}
   data-name={member.name}
   data-username={member.preferred_username}
+  data-major={member.profile?.major || ''}
   data-roles={visibleRoles.join(',')}
   data-grad={member.graduation_year ?? ''}
   data-email={primaryVisibleEmail || ''}
@@ -119,6 +120,11 @@ const discordSearchData = [discordHandle, discordGuildNick, cleanDiscordId].filt
 
     <!-- Badges Row -->
     <div class="flex flex-wrap gap-1.5 mt-3.5">
+      {member.profile?.major && (
+        <Badge color="outline" class="text-[10px]">
+          {member.profile.major}
+        </Badge>
+      )}
       {isSelf && (
         <Badge color="outline" class="border-ph-purple text-ph-purple dark:border-ph-yellow dark:text-ph-yellow">
           You

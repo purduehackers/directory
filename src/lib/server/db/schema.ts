@@ -23,6 +23,7 @@ export type ContactVisibility = {
 export const memberProfiles = sqliteTable('member_profiles', {
   sub: text('sub').primaryKey(),
   headline: text('headline'),
+  major: text('major'),
   bio: text('bio'),
   location: text('location'),
   timezone: text('timezone'),
@@ -38,6 +39,7 @@ export type MemberProfileRow = typeof memberProfiles.$inferSelect;
 export type MemberProfile = {
   sub: string;
   headline: string | null;
+  major: string | null;
   bio: string | null;
   location: string | null;
   timezone: string | null;

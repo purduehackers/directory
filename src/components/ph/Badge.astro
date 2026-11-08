@@ -2,9 +2,9 @@
 type Props = {
   color?: "default" | "yellow" | "purple" | "pink" | "blue" | "lime" | "teal" | "orange" | "outline";
   class?: string;
-};
+} & Record<string, unknown>;
 
-const { color = "default", class: className } = Astro.props;
+const { color = "default", class: className, ...rest } = Astro.props;
 
 const colors = {
   default: "bg-foreground text-background",
@@ -25,6 +25,7 @@ const colors = {
     colors[color],
     className,
   ]}
+  {...rest}
 >
   <slot />
 </span>

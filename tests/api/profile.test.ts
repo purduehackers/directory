@@ -68,6 +68,7 @@ describe('/api/profile endpoint', () => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         headline: 'Systems Engineer',
+        major: 'Computer Science',
         location: 'West Lafayette, IN',
         websiteUrl: 'https://purduehackers.com',
         socials: {
@@ -91,6 +92,7 @@ describe('/api/profile endpoint', () => {
     const body = await res.json();
     expect(body.ok).toBe(true);
     expect(body.profile.headline).toBe('Systems Engineer');
+    expect(body.profile.major).toBe('Computer Science');
     expect(body.profile.location).toBe('West Lafayette, IN');
     expect(body.profile.socials.github).toBe('https://github.com/purduehackers');
   });

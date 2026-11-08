@@ -28,6 +28,7 @@ export function rowToMemberProfile(row: MemberProfileRow): MemberProfile {
   return {
     sub: row.sub,
     headline: row.headline ?? null,
+    major: row.major ?? null,
     bio: row.bio ?? null,
     location: row.location ?? null,
     timezone: row.timezone ?? null,
@@ -115,6 +116,7 @@ async function writeProfileToDb(
   const rowValues: MemberProfileRow = {
     sub: normalizedSub,
     headline: data.headline,
+    major: data.major,
     bio: data.bio,
     location: data.location,
     timezone: data.timezone,
@@ -132,6 +134,7 @@ async function writeProfileToDb(
       target: memberProfiles.sub,
       set: {
         headline: rowValues.headline,
+        major: rowValues.major,
         bio: rowValues.bio,
         location: rowValues.location,
         timezone: rowValues.timezone,
@@ -171,6 +174,7 @@ async function seedDevMockProfilesInternal(): Promise<void> {
   try {
     await writeProfileToDb('01a1a7a2-31ea-7610-9e1d-be737abbeb97', {
       headline: 'Building custom keyboards & distributed systems',
+      major: 'Computer Science',
       bio: 'Purdue Hackers organizer. Obsessed with low-level systems, NixOS, and late-night Hack Night hardware builds.',
       location: 'West Lafayette, IN',
       timezone: 'America/Indiana/Indianapolis',
@@ -185,6 +189,7 @@ async function seedDevMockProfilesInternal(): Promise<void> {
 
     await writeProfileToDb('01a1a761-8139-7553-bdba-b5385b625b5e', {
       headline: 'Systems engineer in SF • Purdue Hackers Alum',
+      major: 'Computer Engineering',
       bio: 'Former Hack Night regular. Now working on storage engines in the Bay Area. Always happy to chat with Purdue folks visiting SF!',
       location: 'San Francisco, CA',
       timezone: 'America/Los_Angeles',

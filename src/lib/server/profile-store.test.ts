@@ -18,6 +18,7 @@ describe('profile-store & snapshot merge', () => {
     const sub = 'test-sub-12345';
     const profile = await upsertMemberProfile(sub, {
       headline: 'FPGA & Compilers hacker',
+      major: 'Computer Science',
       bio: 'Building toy hardware and compilers.',
       location: 'West Lafayette, IN',
       timezone: 'America/Indiana/Indianapolis',
@@ -32,11 +33,13 @@ describe('profile-store & snapshot merge', () => {
 
     expect(profile.sub).toBe(sub);
     expect(profile.location).toBe('West Lafayette, IN');
+    expect(profile.major).toBe('Computer Science');
 
     const fetched = await getMemberProfileBySub(sub);
     expect(fetched).not.toBeNull();
     expect(fetched?.sub).toBe(sub);
     expect(fetched?.headline).toBe('FPGA & Compilers hacker');
+    expect(fetched?.major).toBe('Computer Science');
   });
 
   it('indexes profile fields into MiniSearch and allows searching by location and headline/bio', () => {
@@ -54,6 +57,7 @@ describe('profile-store & snapshot merge', () => {
         profile: {
           sub: 'sub-sf',
           headline: 'Storage engines dev',
+          major: 'Computer Science',
           bio: 'Living in SF',
           location: 'San Francisco, CA',
           timezone: 'America/Los_Angeles',
@@ -77,6 +81,7 @@ describe('profile-store & snapshot merge', () => {
         profile: {
           sub: 'sub-wl',
           headline: 'Hardware club lead',
+          major: null,
           bio: 'Campus organizer',
           location: 'West Lafayette, IN',
           timezone: 'America/Indiana/Indianapolis',
@@ -105,12 +110,18 @@ describe('profile-store & snapshot merge', () => {
     const wlResults = filterAndSearchMembers(snapshot, { query: 'West Lafayette' });
     expect(wlResults).toHaveLength(1);
     expect(wlResults[0].preferred_username).toBe('purduekid');
+
+    // 4. Search by major: "Computer Science"
+    const majorResults = filterAndSearchMembers(snapshot, { query: 'Computer Science' });
+    expect(majorResults).toHaveLength(1);
+    expect(majorResults[0].preferred_username).toBe('sfhacker');
   });
 
   it('persists contact visibility settings and respects them in directory search', async () => {
     const sub = 'sub-contact-privacy';
     await upsertMemberProfile(sub, {
       headline: 'Privacy Advocate',
+      major: null,
       bio: '',
       location: null,
       timezone: null,

@@ -414,6 +414,7 @@ const categorySections =
                 username: (
                     card.getAttribute("data-username") || ""
                 ).toLowerCase(),
+                major: (card.getAttribute("data-major") || "").toLowerCase(),
                 roles: (card.getAttribute("data-roles") || "").toLowerCase(),
                 grad: card.getAttribute("data-grad") || "",
                 email: (card.getAttribute("data-email") || "").toLowerCase(),
@@ -436,6 +437,7 @@ const categorySections =
                     el,
                     name,
                     username,
+                    major,
                     roles,
                     grad,
                     email,
@@ -447,6 +449,7 @@ const categorySections =
                         !q ||
                         name.includes(q) ||
                         username.includes(q) ||
+                        major.includes(q) ||
                         roles.includes(q) ||
                         grad.includes(q) ||
                         email.includes(q) ||

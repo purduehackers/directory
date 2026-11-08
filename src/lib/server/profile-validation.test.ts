@@ -117,6 +117,7 @@ describe('profile-validation', () => {
     it('validates a complete, well-formed profile payload', () => {
       const res = validateProfileInput({
         headline: 'Hacker & Systems Dev',
+        major: 'Computer Science',
         bio: 'Hello world!\nExcited to hack.',
         location: 'West Lafayette, IN',
         timezone: 'America/Indiana/Indianapolis',
@@ -140,6 +141,7 @@ describe('profile-validation', () => {
       expect(res.ok).toBe(true);
       if (res.ok) {
         expect(res.data.headline).toBe('Hacker & Systems Dev');
+        expect(res.data.major).toBe('Computer Science');
         expect(res.data.location).toBe('West Lafayette, IN');
         expect(res.data.socials.github).toBe('https://github.com/purduehackers');
         expect(res.data.customLinks).toHaveLength(1);
@@ -163,10 +165,32 @@ describe('profile-validation', () => {
     it('enforces character limits', () => {
       const res = validateProfileInput({
         headline: 'A'.repeat(150), // limit is 100
+        major: 'B'.repeat(81), // limit is 80
       });
       expect(res.ok).toBe(false);
       if (!res.ok) {
         expect(res.errors.headline).toBeDefined();
+        expect(res.errors.major).toBeDefined();
+      }
+    });
+
+    it('cleans major like other single-line fields and defaults to null when blank', () => {
+      const bidiMajor =
+        '  Computer ' +
+        String.fromCharCode(0x202e) +
+        'Science' +
+        String.fromCharCode(0x200b) +
+        '  ';
+      const res = validateProfileInput({ major: bidiMajor });
+      expect(res.ok).toBe(true);
+      if (res.ok) {
+        expect(res.data.major).toBe('Computer Science');
+      }
+
+      const blank = validateProfileInput({ major: '   ' });
+      expect(blank.ok).toBe(true);
+      if (blank.ok) {
+        expect(blank.data.major).toBeNull();
       }
     });
   });

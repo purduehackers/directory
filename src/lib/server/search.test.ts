@@ -23,6 +23,7 @@ const mockMembers: DirectoryMember[] = [
     profile: {
       sub: '1',
       headline: null,
+      major: null,
       bio: null,
       location: null,
       timezone: null,
@@ -49,6 +50,7 @@ const mockMembers: DirectoryMember[] = [
     profile: {
       sub: '2',
       headline: null,
+      major: null,
       bio: null,
       location: null,
       timezone: null,
