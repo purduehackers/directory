@@ -6,25 +6,16 @@
     "bun": ">=1.2.0"
   },
   "scripts": {
-<<<<<<< HEAD
     "dev": "bunx --bun astro dev",
-    "build": "bunx --bun astro build",
+    "build": "bunx --bun astro build && if [ \"$VERCEL_ENV\" = \"production\" ]; then bunx --bun drizzle-kit migrate; fi",
     "preview": "bunx --bun astro preview",
     "test": "bun test",
     "typecheck": "tsc --noEmit",
-    "astro": "bunx --bun astro"
-=======
-    "dev": "astro dev",
-    "build": "astro build && if [ \"$VERCEL_ENV\" = \"production\" ]; then drizzle-kit migrate; fi",
-    "preview": "astro preview",
-    "test": "bun test",
-    "typecheck": "tsc --noEmit",
-    "astro": "astro",
-    "db:push": "drizzle-kit push",
-    "db:generate": "drizzle-kit generate",
-    "db:migrate": "drizzle-kit migrate",
-    "db:studio": "drizzle-kit studio"
->>>>>>> 504aea2 (feat: add major field to member profiles via drizzle-kit versioned migrations)
+    "astro": "bunx --bun astro",
+    "db:push": "bunx --bun drizzle-kit push",
+    "db:generate": "bunx --bun drizzle-kit generate",
+    "db:migrate": "bunx --bun drizzle-kit migrate",
+    "db:studio": "bunx --bun drizzle-kit studio"
   },
   "dependencies": {
     "@astrojs/vercel": "^11.0.20",
