@@ -153,4 +153,21 @@ describe('Serverless Architecture Verification', () => {
     const inactive = await ensureMemberActive('non-existent-sub-999999');
     expect(inactive).toBe(false);
   });
+
+  test('Vercel and package.json configurations properly target the Bun runtime', async () => {
+    const fs = await import('node:fs');
+    const vercelJson = JSON.parse(fs.readFileSync('vercel.json', 'utf8'));
+    expect(vercelJson.bunVersion).toBe('1.x');
+    expect(vercelJson.runtime).toBeUndefined();
+
+    const pkgJson = JSON.parse(fs.readFileSync('package.json', 'utf8'));
+    expect(pkgJson.engines?.bun).toBe('>=1.2.0');
+    expect(pkgJson.scripts?.build).toContain('--bun');
+    expect(pkgJson.scripts?.dev).toContain('--bun');
+    expect(pkgJson.scripts?.preview).toContain('--bun');
+
+    const astroConfigText = fs.readFileSync('astro.config.mjs', 'utf8');
+    expect(astroConfigText).toContain('@libsql/isomorphic-ws/web.');
+    expect(astroConfigText).toContain('@vercel/oidc/node_modules/jose/dist/browser/');
+  });
 });
