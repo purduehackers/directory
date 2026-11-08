@@ -1,13 +1,17 @@
 import crypto from 'node:crypto';
 
 function getEnv(key: string, fallback = ''): string {
-  // Check import.meta.env (Vite/Astro) then process.env (Node/Bun)
+  // Check process.env (runtime Node/Bun) first so runtime env vars override build-time defaults,
+  // then fall back to import.meta.env (Vite/Astro).
+  if (typeof process !== 'undefined' && process.env && process.env[key]) {
+    return String(process.env[key]);
+  }
   try {
     if (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env[key]) {
       return String(import.meta.env[key]);
     }
   } catch {}
-  return process.env[key] || fallback;
+  return fallback;
 }
 
 const isProd =

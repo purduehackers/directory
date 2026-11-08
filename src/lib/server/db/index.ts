@@ -1,7 +1,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { createClient, type Client } from '@libsql/client';
-import { drizzle, type LibSQLDatabase } from 'drizzle-orm/libsql';
+import { createClient as createWebClient, type Client } from '@libsql/client/web';
+import { drizzle } from 'drizzle-orm/libsql/web';
+import type { LibSQLDatabase } from 'drizzle-orm/libsql';
 import { config } from '../config';
 import * as schema from './schema';
 
@@ -27,24 +28,30 @@ function ensureLocalSqliteDir(dbUrl: string): void {
   }
 }
 
-export function getDb(): LibSQLDatabase<typeof schema> {
+export async function getDb(): Promise<LibSQLDatabase<typeof schema>> {
   if (!dbInstance) {
     const url = config.databaseUrl;
     isLocalClient = isLocalSqliteUrl(url);
     if (isLocalClient) {
       ensureLocalSqliteDir(url);
+      const { createClient: createLocalClient } = await import('@libsql/client/sqlite3');
+      clientInstance = createLocalClient({
+        url,
+        authToken: config.databaseAuthToken,
+      });
+    } else {
+      clientInstance = createWebClient({
+        url,
+        authToken: config.databaseAuthToken,
+      });
     }
-    clientInstance = createClient({
-      url,
-      authToken: config.databaseAuthToken,
-    });
     dbInstance = drizzle(clientInstance, { schema });
   }
   return dbInstance;
 }
 
 export async function ensureDbInitialized(): Promise<LibSQLDatabase<typeof schema>> {
-  const db = getDb();
+  const db = await getDb();
   if (!initPromise) {
     initPromise = (async () => {
       try {

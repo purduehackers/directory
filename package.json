@@ -3,15 +3,15 @@
   "type": "module",
   "version": "0.0.1",
   "engines": {
-    "node": ">=22.23.4"
+    "bun": ">=1.2.0"
   },
   "scripts": {
-    "dev": "astro dev",
-    "build": "astro build",
-    "preview": "astro preview",
+    "dev": "bunx --bun astro dev",
+    "build": "bunx --bun astro build",
+    "preview": "bunx --bun astro preview",
     "test": "bun test",
     "typecheck": "tsc --noEmit",
-    "astro": "astro"
+    "astro": "bunx --bun astro"
   },
   "dependencies": {
     "@astrojs/vercel": "^11.0.20",
