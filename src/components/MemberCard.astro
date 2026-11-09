@@ -10,10 +10,9 @@ import Icon from './ph/Icon.astro';
 
 type Props = {
   member: DirectoryMember;
-  isSelf?: boolean;
 };
 
-const { member, isSelf = false } = Astro.props;
+const { member } = Astro.props;
 
 const grad = member.graduation_year
   ? `'${String(member.graduation_year).slice(-2)}`
@@ -123,11 +122,6 @@ const discordSearchData = [discordHandle, discordGuildNick, cleanDiscordId].filt
       {member.profile?.major && (
         <Badge color="outline" class="text-[10px]">
           {member.profile.major}
-        </Badge>
-      )}
-      {isSelf && (
-        <Badge color="outline" class="border-ph-purple text-ph-purple dark:border-ph-yellow dark:text-ph-yellow">
-          You
         </Badge>
       )}
       {visibleRoles && visibleRoles.length > 0 ? (

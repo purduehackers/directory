@@ -37,7 +37,6 @@ const filteredMembers = snapshot
     : [];
 
 const availableGradYears = snapshot?.gradYears ?? [];
-const viewer = Astro.locals.user;
 const hasActiveFilters = Boolean(
     query ||
     role !== "all" ||
@@ -329,14 +328,7 @@ const categorySections =
                         </div>
                         <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                             {section.members.map((member) => (
-                                <MemberCard
-                                    member={member}
-                                    isSelf={
-                                        viewer?.preferred_username?.toLowerCase() ===
-                                            member.preferred_username.toLowerCase() ||
-                                        viewer?.sub === member.sub
-                                    }
-                                />
+                                <MemberCard member={member} />
                             ))}
                         </div>
                     </section>
@@ -348,14 +340,7 @@ const categorySections =
                 class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4"
             >
                 {filteredMembers.map((member) => (
-                    <MemberCard
-                        member={member}
-                        isSelf={
-                            viewer?.preferred_username?.toLowerCase() ===
-                                member.preferred_username.toLowerCase() ||
-                            viewer?.sub === member.sub
-                        }
-                    />
+                    <MemberCard member={member} />
                 ))}
             </div>
         )}
