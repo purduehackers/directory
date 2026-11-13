@@ -1,5 +1,7 @@
 import { sqliteTable, text, integer } from 'drizzle-orm/sqlite-core';
 
+export type TimeFormat = '12h' | '24h';
+
 export type SocialLinks = {
   github?: string;
   x?: string;
@@ -27,6 +29,7 @@ export const memberProfiles = sqliteTable('member_profiles', {
   bio: text('bio'),
   location: text('location'),
   timezone: text('timezone'),
+  timeFormat: text('time_format'),
   websiteUrl: text('website_url'),
   socialsJson: text('socials_json').notNull().default('{}'),
   customLinksJson: text('custom_links_json').notNull().default('[]'),
@@ -43,6 +46,7 @@ export type MemberProfile = {
   bio: string | null;
   location: string | null;
   timezone: string | null;
+  timeFormat?: TimeFormat;
   websiteUrl: string | null;
   socials: SocialLinks;
   customLinks: CustomLink[];

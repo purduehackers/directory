@@ -109,6 +109,7 @@ if (Astro.request.method === "POST") {
                 const bio = formData.get("bio")?.toString() || "";
                 const location = formData.get("location")?.toString() || "";
                 const timezone = formData.get("timezone")?.toString() || "";
+                const timeFormat = formData.get("timeFormat")?.toString() || "12h";
                 const websiteUrl = formData.get("websiteUrl")?.toString() || "";
 
                 const socials: Record<string, string> = {
@@ -167,6 +168,7 @@ if (Astro.request.method === "POST") {
                     bio,
                     location,
                     timezone,
+                    timeFormat,
                     websiteUrl,
                     socials,
                     customLinks,
@@ -184,6 +186,7 @@ if (Astro.request.method === "POST") {
                         bio: bio || null,
                         location: location || null,
                         timezone: timezone || null,
+                        timeFormat: timeFormat === "24h" ? "24h" : "12h",
                         websiteUrl: websiteUrl || null,
                         socials: {
                             ...profile?.socials,
@@ -421,6 +424,27 @@ for (const p of SOCIAL_PLATFORMS) {
                             </div>
                         </Field>
                     </div>
+
+                    <Field
+                        label="Time Format"
+                        hint="How your local time is formatted on your profile."
+                        error={fieldErrors.timeFormat}
+                    >
+                        <Select id="timeFormat" name="timeFormat">
+                            <option
+                                value="12h"
+                                selected={(profile?.timeFormat ?? "12h") === "12h"}
+                            >
+                                12-hour (e.g. 2:30 PM EDT)
+                            </option>
+                            <option
+                                value="24h"
+                                selected={profile?.timeFormat === "24h"}
+                            >
+                                24-hour (e.g. 14:30 EDT)
+                            </option>
+                        </Select>
+                    </Field>
                 </div>
 
                 <!-- Section 3: Website & Socials -->
@@ -894,6 +918,7 @@ for (const p of SOCIAL_PLATFORMS) {
                             <!-- Dynamic Social Pills -->
                             <div
                                 id="pv-socials-row"
+                                data-discord-label={member?.discord_id ? (member.discord?.guildNickname || (member.discord?.username ? `@${member.discord.username}` : "Discord")) : ""}
                                 class="flex flex-wrap items-center gap-2 mt-4 pt-3 border-t border-border hidden"
                             ></div>
                         </div>
@@ -971,46 +996,6 @@ for (const p of SOCIAL_PLATFORMS) {
                                 ></p>
                             </div>
                         </div>
-
-                        <!-- Discord Card -->
-                        {member?.discord_id && (
-                            <div class="border border-foreground p-4 bg-card flex flex-col justify-between">
-                                <div>
-                                    <span class="ph-subheadline text-xs flex items-center gap-1.5 mb-2 text-foreground/85">
-                                        <Icon
-                                            name="discord"
-                                            class="size-3.5 text-ph-purple dark:text-ph-periwinkle"
-                                        />
-                                        <span>Discord</span>
-                                    </span>
-                                    {member.discord?.guildNickname ? (
-                                        <div>
-                                            <p class="font-sans text-sm font-bold text-foreground leading-snug">
-                                                {member.discord.guildNickname}
-                                            </p>
-                                            <p class="font-mono text-xs text-foreground/75 mt-0.5">
-                                                @{member.discord.username}
-                                            </p>
-                                        </div>
-                                    ) : member.discord?.username ? (
-                                        <div>
-                                            <p class="font-mono text-sm font-semibold text-foreground">
-                                                @{member.discord.username}
-                                            </p>
-                                            {member.discord.globalName && member.discord.globalName.toLowerCase() !== member.discord.username.toLowerCase() && (
-                                                <p class="font-sans text-xs text-foreground/75 mt-0.5">
-                                                    {member.discord.globalName}
-                                                </p>
-                                            )}
-                                        </div>
-                                    ) : (
-                                        <p class="font-mono text-sm font-semibold text-foreground">
-                                            Connected
-                                        </p>
-                                    )}
-                                </div>
-                            </div>
-                        )}
                     </div>
                 </div>
             </div>
@@ -1137,7 +1122,7 @@ for (const p of SOCIAL_PLATFORMS) {
                                     class="size-3.5 text-ph-purple dark:text-ph-periwinkle"
                                 />
                                 <span class="font-mono truncate">
-                                    {member.discord?.username ? `@${member.discord.username}` : "Discord"}
+                                    {member.discord?.guildNickname || (member.discord?.username ? `@${member.discord.username}` : "Discord")}
                                 </span>
                             </span>
                         )}
@@ -1524,6 +1509,7 @@ for (const p of SOCIAL_PLATFORMS) {
                 bio: formData.get("bio")?.toString() || "",
                 location: formData.get("location")?.toString() || "",
                 timezone: formData.get("timezone")?.toString() || "",
+                timeFormat: formData.get("timeFormat")?.toString() || "12h",
                 websiteUrl: formData.get("websiteUrl")?.toString() || "",
                 socials,
                 customLinks,
@@ -1692,6 +1678,9 @@ for (const p of SOCIAL_PLATFORMS) {
 
         const pvTzItem = document.getElementById("pv-timezone-item");
         const pvTzText = document.getElementById("pv-timezone-text");
+        const timeFormat =
+            (document.getElementById("timeFormat") as HTMLSelectElement | null)
+                ?.value || "12h";
         let localTimeFormatted = "";
         if (timezone) {
             try {
@@ -1699,6 +1688,7 @@ for (const p of SOCIAL_PLATFORMS) {
                     timeZone: timezone,
                     hour: "numeric",
                     minute: "2-digit",
+                    hour12: timeFormat !== "24h",
                     timeZoneName: "short",
                 }).format(new Date());
             } catch {
@@ -1717,12 +1707,73 @@ for (const p of SOCIAL_PLATFORMS) {
         }
 
         // 3. Socials
+        function formatPreviewSocialLabel(platform: string, raw: string): string {
+            const val = raw.trim();
+            if (!val) return "";
+            if (platform === "website") {
+                try {
+                    const parsed = new URL(/^https?:\/\//i.test(val) ? val : `https://${val}`);
+                    const host = parsed.hostname.toLowerCase().replace(/^www\./, "");
+                    const path = parsed.pathname.replace(/\/+$/, "");
+                    return path && path !== "/" ? `${host}${path}` : host;
+                } catch {
+                    return val;
+                }
+            }
+            if (/^https?:\/\//i.test(val) || val.includes("/")) {
+                try {
+                    const parsed = new URL(/^https?:\/\//i.test(val) ? val : `https://${val}`);
+                    const segs = parsed.pathname.split("/").filter(Boolean);
+                    const host = parsed.hostname.toLowerCase().replace(/^www\./, "");
+                    if (platform === "github") return (segs[0] || val).replace(/^@/, "");
+                    if (platform === "x" || platform === "instagram") {
+                        const h = (segs[0] || "").replace(/^@/, "");
+                        return h ? `@${h}` : val;
+                    }
+                    if (platform === "youtube") {
+                        const last = segs[segs.length - 1] || "";
+                        return last ? (last.startsWith("@") ? last : `@${last}`) : val;
+                    }
+                    if (platform === "linkedin") {
+                        if (segs[0]?.toLowerCase() === "in" && segs[1]) return `in/${segs[1]}`;
+                        return segs.length > 0 ? segs.join("/") : val;
+                    }
+                    if (platform === "bluesky") {
+                        const last = (segs[segs.length - 1] || "").replace(/^@/, "");
+                        return last ? `@${last}` : val;
+                    }
+                    if (platform === "mastodon") {
+                        const rawUser = segs[0]?.toLowerCase() === "users" && segs[1] ? segs[1] : segs[0] || "";
+                        const u = rawUser.replace(/^@/, "");
+                        return u ? `@${u}@${host}` : val;
+                    }
+                } catch {
+                    return val;
+                }
+            }
+            const stripped = val.replace(/^@/, "");
+            if (platform === "github") return stripped;
+            if (platform === "linkedin") return `in/${stripped.replace(/^in\//i, "")}`;
+            if (platform === "bluesky") {
+                return `@${stripped.includes(".") ? stripped : `${stripped}.bsky.social`}`;
+            }
+            if (platform === "mastodon") return `@${stripped}`;
+            return `@${stripped}`;
+        }
+
         const pvSocialsRow = document.getElementById("pv-socials-row");
         if (pvSocialsRow) {
             pvSocialsRow.innerHTML = "";
             const socialsList: Array<{ label: string; url: string }> = [];
+            const discordLabel = pvSocialsRow.getAttribute("data-discord-label");
+            if (discordLabel) {
+                socialsList.push({ label: discordLabel, url: "#" });
+            }
             if (websiteUrl) {
-                socialsList.push({ label: "Website", url: websiteUrl });
+                socialsList.push({
+                    label: formatPreviewSocialLabel("website", websiteUrl),
+                    url: websiteUrl,
+                });
             }
             document
                 .querySelectorAll<HTMLElement>(".social-row")
@@ -1734,10 +1785,8 @@ for (const p of SOCIAL_PLATFORMS) {
                         "input[name='social_value']",
                     );
                     if (sel && inp && inp.value.trim()) {
-                        const optText =
-                            sel.options[sel.selectedIndex]?.text || sel.value;
                         socialsList.push({
-                            label: optText,
+                            label: formatPreviewSocialLabel(sel.value, inp.value.trim()),
                             url: inp.value.trim(),
                         });
                     }
@@ -1890,11 +1939,7 @@ for (const p of SOCIAL_PLATFORMS) {
         const hasAnyContact =
             checkedEmails.length > 0 || (phoneVisible && !!phoneVal);
         if (pvContactSec) {
-            const hasDiscord = !!pvContactSec.querySelector(".text-ph-purple");
-            pvContactSec.classList.toggle(
-                "hidden",
-                !hasAnyContact && !hasDiscord,
-            );
+            pvContactSec.classList.toggle("hidden", !hasAnyContact);
         }
         const pvcFooter = document.getElementById("pvc-footer");
         if (pvcFooter) {

@@ -12,7 +12,7 @@ import {
 } from "../../lib/server/id-directory";
 import { formatPhone } from "../../lib/phone";
 import { config } from "../../lib/server/config";
-import { sanitizeHttpUrl } from "../../lib/server/profile-validation";
+import { sanitizeHttpUrl, formatSocialLabel } from "../../lib/server/profile-validation";
 import type { IconName } from "../../components/ph/icons";
 
 const { username } = Astro.params;
@@ -56,13 +56,17 @@ const visibleRoles = (member?.roles || []).filter(
 
 const profile = member?.profile;
 
-function formatInitialLocalTime(tz: string | null | undefined): string | null {
+function formatInitialLocalTime(
+    tz: string | null | undefined,
+    timeFormat: "12h" | "24h" = "12h"
+): string | null {
     if (!tz) return null;
     try {
         return new Intl.DateTimeFormat("en-US", {
             timeZone: tz,
             hour: "numeric",
             minute: "2-digit",
+            hour12: timeFormat !== "24h",
             timeZoneName: "short",
         }).format(new Date());
     } catch {
@@ -70,33 +74,73 @@ function formatInitialLocalTime(tz: string | null | undefined): string | null {
     }
 }
 
-const serverLocalTime = formatInitialLocalTime(profile?.timezone);
+const timeFormat = profile?.timeFormat === "24h" ? "24h" : "12h";
+const serverLocalTime = formatInitialLocalTime(profile?.timezone, timeFormat);
 
 type SocialItem = {
     platform: string;
     url: string;
     icon: IconName;
     label: string;
+    title: string;
 };
 
 const socialItems: SocialItem[] = [];
+if (member?.discord_id?.trim()) {
+    const cleanDiscordId = member.discord_id.trim();
+    const discordUrl = `https://discord.com/users/${encodeURIComponent(cleanDiscordId)}`;
+    const discordLabel =
+        member.discord?.guildNickname ||
+        (member.discord?.username ? `@${member.discord.username}` : "Discord");
+    const discordTitle =
+        member.discord?.guildNickname && member.discord?.username
+            ? `Discord: ${member.discord.guildNickname} (@${member.discord.username})`
+            : member.discord?.username
+              ? `Discord: @${member.discord.username}`
+              : "Discord";
+    socialItems.push({
+        platform: "discord",
+        url: discordUrl,
+        icon: "discord",
+        label: discordLabel,
+        title: discordTitle,
+    });
+}
 if (profile?.websiteUrl) {
+    const label = formatSocialLabel("website", profile.websiteUrl);
     socialItems.push({
         platform: "website",
         url: profile.websiteUrl,
         icon: "globe",
-        label: "Website",
+        label,
+        title: `Website (${label})`,
     });
 }
 if (profile?.socials) {
     const s = profile.socials;
-    if (s.github) socialItems.push({ platform: "github", url: s.github, icon: "github", label: "GitHub" });
-    if (s.x) socialItems.push({ platform: "x", url: s.x, icon: "x", label: "X" });
-    if (s.bluesky) socialItems.push({ platform: "bluesky", url: s.bluesky, icon: "bluesky", label: "Bluesky" });
-    if (s.youtube) socialItems.push({ platform: "youtube", url: s.youtube, icon: "youtube", label: "YouTube" });
-    if (s.instagram) socialItems.push({ platform: "instagram", url: s.instagram, icon: "instagram", label: "Instagram" });
-    if (s.linkedin) socialItems.push({ platform: "linkedin", url: s.linkedin, icon: "linkedin", label: "LinkedIn" });
-    if (s.mastodon) socialItems.push({ platform: "mastodon", url: s.mastodon, icon: "mastodon", label: "Mastodon" });
+    const addSocial = (
+        platform: "github" | "x" | "bluesky" | "youtube" | "instagram" | "linkedin" | "mastodon",
+        url: string | undefined,
+        icon: IconName,
+        platformName: string
+    ) => {
+        if (!url) return;
+        const label = formatSocialLabel(platform, url);
+        socialItems.push({
+            platform,
+            url,
+            icon,
+            label,
+            title: `${platformName} (${label})`,
+        });
+    };
+    addSocial("github", s.github, "github", "GitHub");
+    addSocial("x", s.x, "x", "X");
+    addSocial("bluesky", s.bluesky, "bluesky", "Bluesky");
+    addSocial("youtube", s.youtube, "youtube", "YouTube");
+    addSocial("instagram", s.instagram, "instagram", "Instagram");
+    addSocial("linkedin", s.linkedin, "linkedin", "LinkedIn");
+    addSocial("mastodon", s.mastodon, "mastodon", "Mastodon");
 }
 
 const hasHackingSection = Boolean(
@@ -106,7 +150,6 @@ const hasHackingSection = Boolean(
 
 const hasContactSection = Boolean(
     visibleEmails.length > 0 ||
-    member?.discord_id ||
     visiblePhone
 );
 ---
@@ -193,7 +236,7 @@ const hasContactSection = Boolean(
                                     {serverLocalTime && (
                                         <span class="inline-flex items-center gap-1 border-l border-border pl-3">
                                             <Icon name="clock" class="size-3.5 text-foreground/70" />
-                                            <span data-tz={profile?.timezone}>{serverLocalTime}</span>
+                                            <span data-tz={profile?.timezone} data-time-format={timeFormat}>{serverLocalTime}</span>
                                         </span>
                                     )}
                                 </div>
@@ -230,7 +273,7 @@ const hasContactSection = Boolean(
                                             target="_blank"
                                             rel="noopener noreferrer"
                                             class="border border-foreground bg-background hover:bg-ph-yellow hover:text-ph-black px-2.5 py-1 font-mono text-xs font-semibold inline-flex items-center gap-1.5 transition-colors no-underline text-foreground"
-                                            title={item.label}
+                                            title={item.title}
                                         >
                                             <Icon name={item.icon} class="size-3.5" />
                                             <span>{item.label}</span>
@@ -249,14 +292,6 @@ const hasContactSection = Boolean(
                                 >
                                     <Icon name="pencil" class="size-3" />
                                     <span>Edit Profile</span>
-                                </a>
-                                <a
-                                    href={`${config.idBase}`}
-                                    target="_blank"
-                                    rel="noopener noreferrer"
-                                    class="border border-foreground bg-background text-foreground px-3 py-1.5 font-mono text-xs font-bold uppercase hover:bg-foreground hover:text-background transition-colors text-center no-underline"
-                                >
-                                    Edit on ID ↗
                                 </a>
                             </div>
                         )}
@@ -391,76 +426,6 @@ const hasContactSection = Boolean(
                                     </div>
                                 </div>
                             )}
-
-                            <!-- Discord -->
-                            {member.discord_id && (
-                                <div class="border border-foreground p-5 bg-card flex flex-col gap-2.5">
-                                    <span class="ph-subheadline text-xs flex items-center gap-1.5 text-foreground/85">
-                                        <Icon
-                                            name="discord"
-                                            class="size-4 text-ph-purple dark:text-ph-periwinkle"
-                                        />
-                                        Discord
-                                    </span>
-                                    <div class="flex items-center justify-between gap-3 mt-0.5">
-                                        <a
-                                            href={`https://discord.com/users/${encodeURIComponent(member.discord_id)}`}
-                                            target="_blank"
-                                            rel="noopener noreferrer"
-                                            class="group inline-flex flex-col gap-0.5 no-underline"
-                                        >
-                                            {member.discord?.guildNickname ? (
-                                                <div>
-                                                    <p class="font-sans text-sm font-bold text-foreground group-hover:text-ph-purple dark:group-hover:text-ph-yellow leading-snug break-words transition-colors inline-flex items-center gap-1 underline decoration-foreground/30 group-hover:decoration-foreground">
-                                                        <span>{member.discord.guildNickname}</span>
-                                                        <span class="text-xs font-mono text-foreground/60 no-underline">↗</span>
-                                                    </p>
-                                                    <p class="font-mono text-xs text-foreground/75 mt-0.5">
-                                                        @{member.discord.username}
-                                                    </p>
-                                                </div>
-                                            ) : member.discord?.username ? (
-                                                <div>
-                                                    {member.discord.globalName && member.discord.globalName.toLowerCase() !== member.discord.username.toLowerCase() ? (
-                                                        <>
-                                                            <p class="font-sans text-sm font-bold text-foreground group-hover:text-ph-purple dark:group-hover:text-ph-yellow leading-snug break-words transition-colors inline-flex items-center gap-1 underline decoration-foreground/30 group-hover:decoration-foreground">
-                                                                <span>{member.discord.globalName}</span>
-                                                                <span class="text-xs font-mono text-foreground/60 no-underline">↗</span>
-                                                            </p>
-                                                            <p class="font-mono text-xs text-foreground/75 mt-0.5">
-                                                                @{member.discord.username}
-                                                            </p>
-                                                        </>
-                                                    ) : (
-                                                        <p class="font-mono text-sm font-semibold text-foreground group-hover:text-ph-purple dark:group-hover:text-ph-yellow break-all transition-colors inline-flex items-center gap-1 underline decoration-foreground/30 group-hover:decoration-foreground">
-                                                            <span>@{member.discord.username}</span>
-                                                            <span class="text-xs font-mono text-foreground/60 no-underline">↗</span>
-                                                        </p>
-                                                    )}
-                                                </div>
-                                            ) : (
-                                                <p class="font-mono text-sm font-semibold text-foreground group-hover:text-ph-purple dark:group-hover:text-ph-yellow transition-colors inline-flex items-center gap-1 underline decoration-foreground/30 group-hover:decoration-foreground">
-                                                    <span>Open Discord Profile</span>
-                                                    <span class="text-xs font-mono text-foreground/60 no-underline">↗</span>
-                                                </p>
-                                            )}
-                                        </a>
-
-                                        {member.discord?.username && (
-                                            <button
-                                                type="button"
-                                                data-copy={member.discord.username}
-                                                class="inline-flex items-center justify-center text-foreground/60 hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-foreground transition-colors p-1 cursor-pointer shrink-0 self-start mt-0.5"
-                                                title="Copy Discord username"
-                                                aria-label={`Copy @${member.discord.username}`}
-                                            >
-                                                <Icon name="copy" class="size-3.5 copy-icon" />
-                                                <Icon name="check" class="size-3.5 check-icon text-ph-lime hidden" />
-                                            </button>
-                                        )}
-                                    </div>
-                                </div>
-                            )}
                         </div>
                     </div>
                 )}
@@ -514,11 +479,13 @@ const hasContactSection = Boolean(
         for (const el of tzEls) {
             const tz = el.getAttribute("data-tz");
             if (!tz) continue;
+            const tf = el.getAttribute("data-time-format");
             try {
                 const formatted = new Intl.DateTimeFormat("en-US", {
                     timeZone: tz,
                     hour: "numeric",
                     minute: "2-digit",
+                    hour12: tf !== "24h",
                     timeZoneName: "short",
                 }).format(new Date());
                 el.textContent = formatted;

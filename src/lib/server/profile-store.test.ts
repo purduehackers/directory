@@ -22,6 +22,7 @@ describe('profile-store & snapshot merge', () => {
       bio: 'Building toy hardware and compilers.',
       location: 'West Lafayette, IN',
       timezone: 'America/Indiana/Indianapolis',
+      timeFormat: '24h',
       websiteUrl: 'https://purduehackers.com',
       socials: {
         github: 'https://github.com/purduehackers',
@@ -34,12 +35,14 @@ describe('profile-store & snapshot merge', () => {
     expect(profile.sub).toBe(sub);
     expect(profile.location).toBe('West Lafayette, IN');
     expect(profile.major).toBe('Computer Science');
+    expect(profile.timeFormat).toBe('24h');
 
     const fetched = await getMemberProfileBySub(sub);
     expect(fetched).not.toBeNull();
     expect(fetched?.sub).toBe(sub);
     expect(fetched?.headline).toBe('FPGA & Compilers hacker');
     expect(fetched?.major).toBe('Computer Science');
+    expect(fetched?.timeFormat).toBe('24h');
   });
 
   it('indexes profile fields into MiniSearch and allows searching by location and headline/bio', () => {

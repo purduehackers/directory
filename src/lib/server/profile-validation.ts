@@ -1,4 +1,4 @@
-import type { ContactVisibility, CustomLink, SocialLinks } from './db/schema';
+import type { ContactVisibility, CustomLink, SocialLinks, TimeFormat } from './db/schema';
 import { config } from './config';
 
 export type ProfileInputPayload = {
@@ -7,6 +7,7 @@ export type ProfileInputPayload = {
   bio?: unknown;
   location?: unknown;
   timezone?: unknown;
+  timeFormat?: unknown;
   websiteUrl?: unknown;
   socials?: Record<string, unknown> | unknown;
   customLinks?: unknown;
@@ -19,6 +20,7 @@ export type ValidatedProfileData = {
   bio: string | null;
   location: string | null;
   timezone: string | null;
+  timeFormat?: TimeFormat;
   websiteUrl: string | null;
   socials: SocialLinks;
   customLinks: CustomLink[];
@@ -226,6 +228,70 @@ export function normalizeSocialLink(
   }
 }
 
+export function formatSocialLabel(
+  platform: SocialPlatform | 'website',
+  urlOrInput: string
+): string {
+  const cleaned = cleanSingleLine(urlOrInput);
+  if (!cleaned) return '';
+
+  if (platform === 'website') {
+    try {
+      const candidate = /^https?:\/\//i.test(cleaned) ? cleaned : `https://${cleaned}`;
+      const parsed = new URL(candidate);
+      const host = parsed.hostname.toLowerCase().replace(/^www\./, '');
+      const path = parsed.pathname.replace(/\/+$/, '');
+      return path && path !== '/' ? `${host}${path}` : host;
+    } catch {
+      return 'Website';
+    }
+  }
+
+  const normalized = normalizeSocialLink(platform, cleaned).value ?? cleaned;
+  try {
+    const parsed = new URL(normalized);
+    const segments = parsed.pathname.split('/').filter(Boolean);
+    const host = parsed.hostname.toLowerCase().replace(/^www\./, '');
+
+    switch (platform) {
+      case 'github': {
+        const handle = (segments[0] || '').replace(/^@/, '');
+        return handle || cleaned;
+      }
+      case 'x':
+      case 'instagram': {
+        const handle = (segments[0] || '').replace(/^@/, '');
+        return handle ? `@${handle}` : cleaned;
+      }
+      case 'youtube': {
+        const last = segments[segments.length - 1] || '';
+        if (!last) return cleaned;
+        return last.startsWith('@') ? last : `@${last}`;
+      }
+      case 'linkedin': {
+        if (segments[0]?.toLowerCase() === 'in' && segments[1]) {
+          return `in/${segments[1]}`;
+        }
+        return segments.length > 0 ? segments.join('/') : cleaned;
+      }
+      case 'bluesky': {
+        const last = (segments[segments.length - 1] || '').replace(/^@/, '');
+        return last ? `@${last}` : cleaned;
+      }
+      case 'mastodon': {
+        const rawUser =
+          segments[0]?.toLowerCase() === 'users' && segments[1]
+            ? segments[1]
+            : segments[0] || '';
+        const user = rawUser.replace(/^@/, '');
+        return user ? `@${user}@${host}` : cleaned;
+      }
+    }
+  } catch {
+    return cleaned;
+  }
+}
+
 export function canonicalizeIanaTimezone(tz: string): string | null {
   try {
     return Intl.DateTimeFormat(undefined, { timeZone: tz }).resolvedOptions().timeZone;
@@ -265,13 +331,25 @@ export function validateProfileInput(input: ProfileInputPayload): ProfileValidat
     errors.location = `Location must be ${PROFILE_LIMITS.location} characters or fewer.`;
   }
 
-  // 4. Timezone
+  // 4. Timezone & Time Format
   const rawTz = cleanSingleLine(input.timezone);
   let timezone: string | null = null;
   if (rawTz) {
     timezone = canonicalizeIanaTimezone(rawTz);
     if (!timezone) {
       errors.timezone = 'Invalid IANA timezone identifier.';
+    }
+  }
+
+  const rawTimeFormat = cleanSingleLine(input.timeFormat).toLowerCase();
+  let timeFormat: TimeFormat = '12h';
+  if (rawTimeFormat) {
+    if (rawTimeFormat === '12h' || rawTimeFormat === '12') {
+      timeFormat = '12h';
+    } else if (rawTimeFormat === '24h' || rawTimeFormat === '24') {
+      timeFormat = '24h';
+    } else {
+      errors.timeFormat = 'Time format must be 12h or 24h.';
     }
   }
 
@@ -368,6 +446,7 @@ export function validateProfileInput(input: ProfileInputPayload): ProfileValidat
       bio: bio || null,
       location: location || null,
       timezone: timezone || null,
+      timeFormat,
       websiteUrl: websiteResult.url,
       socials,
       customLinks,

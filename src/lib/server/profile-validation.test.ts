@@ -2,6 +2,7 @@ import { describe, expect, it } from 'bun:test';
 import {
   cleanSingleLine,
   cleanMultiLine,
+  formatSocialLabel,
   normalizeSocialLink,
   sanitizeHttpUrl,
   isValidIanaTimezone,
@@ -192,6 +193,47 @@ describe('profile-validation', () => {
       if (blank.ok) {
         expect(blank.data.major).toBeNull();
       }
+    });
+
+    it('validates timeFormat (12h, 24h, default 12h, invalid rejected)', () => {
+      const def = validateProfileInput({ timezone: 'UTC' });
+      expect(def.ok).toBe(true);
+      if (def.ok) {
+        expect(def.data.timeFormat).toBe('12h');
+      }
+
+      const h24 = validateProfileInput({ timezone: 'UTC', timeFormat: '24h' });
+      expect(h24.ok).toBe(true);
+      if (h24.ok) {
+        expect(h24.data.timeFormat).toBe('24h');
+      }
+
+      const bad = validateProfileInput({ timezone: 'UTC', timeFormat: '36h' });
+      expect(bad.ok).toBe(false);
+      if (!bad.ok) {
+        expect(bad.errors.timeFormat).toBeDefined();
+      }
+    });
+  });
+
+  describe('formatSocialLabel', () => {
+    it('formats website domains and paths cleanly', () => {
+      expect(formatSocialLabel('website', 'https://www.purduehackers.com/')).toBe('purduehackers.com');
+      expect(formatSocialLabel('website', 'https://alice.dev/blog/')).toBe('alice.dev/blog');
+    });
+
+    it('formats github, x, instagram, and youtube handles', () => {
+      expect(formatSocialLabel('github', 'https://github.com/torvalds')).toBe('torvalds');
+      expect(formatSocialLabel('x', 'https://x.com/purduehackers')).toBe('@purduehackers');
+      expect(formatSocialLabel('instagram', 'https://www.instagram.com/purduehackers')).toBe('@purduehackers');
+      expect(formatSocialLabel('youtube', 'https://www.youtube.com/@purduehackers')).toBe('@purduehackers');
+    });
+
+    it('formats linkedin, bluesky, and mastodon profiles', () => {
+      expect(formatSocialLabel('linkedin', 'https://www.linkedin.com/in/torvalds')).toBe('in/torvalds');
+      expect(formatSocialLabel('bluesky', 'https://bsky.app/profile/alice.bsky.social')).toBe('@alice.bsky.social');
+      expect(formatSocialLabel('mastodon', 'https://fosstodon.org/@user')).toBe('@user@fosstodon.org');
+      expect(formatSocialLabel('mastodon', 'https://mastodon.social/users/alice')).toBe('@alice@mastodon.social');
     });
   });
 });
